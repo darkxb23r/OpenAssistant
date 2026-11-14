@@ -1,0 +1,63 @@
+# Jarvis's permission rules: an example. Copy it to ~/.jarvis/permissions.toml and edit, or let
+# jarvisctl write the file for you:
+#
+#   python jarvisctl.py rules                      list them, numbered
+#   python jarvisctl.py allow "git *"              never ask before these
+#   python jarvisctl.py always-ask "git push *"    always ask before these
+#   python jarvisctl.py trust-folder C:\Users\me\Projects\Beancount-Portable
+#   python jarvisctl.py ask-folder C:\Users\me\Documents\Finance
+#   python jarvisctl.py remove 3                   (or remove the exact value)
+#
+# Or say it: "stop asking about git commands" makes Jarvis propose the rule, and you confirm it at
+# the PC or on a paired screen (never by text, call or a voice satellite).
+#
+# Jarvis rereads this file whenever it changes. If it can't be read (a typo, an unknown setting),
+# Jarvis keeps the last rules that worked and tells you once what's wrong.
+#
+# Use 'single quotes' for Windows paths: TOML reads them exactly as written. In "double quotes" a
+# backslash starts an escape, so you'd have to write C:\\Users\\me.
+
+[folders]
+# Like your free zone: Jarvis edits, deletes and runs commands in these without asking (a command
+# that starts with `cd <folder> &&` and keeps every path inside it). Protected folders inside stay
+# protected. Refused: protected folders, a whole drive, your home folder itself (or one holding
+# it), and any folder holding Jarvis's own program folder.
+trusted = [
+    'C:\Users\me\Projects\Beancount-Portable',
+]
+# Anything naming a path in here asks first, even just reading it: file tools, Read/Glob/Grep, and
+# shell commands. Answering "always" to those questions saves nothing.
+always_ask = [
+    'C:\Users\me\Documents\Finance',
+]
+# Projects whose own Claude Code settings (.claude/settings.json and .claude/settings.local.json)
+# Jarvis follows for commands he runs there, starting with `cd <project> &&`: their Bash and
+# PowerShell allow rules ("Bash" alone is every command, "Bash(npm run test:*)" a prefix) run
+# without asking; their ask and deny rules always ask. Still asking: the safety floor (power, disks,
+# secret folders, new machines), machine-wide changes like sudo, and deletes outside the free zone.
+# Changing those settings files always asks you, so Jarvis can't grant himself more. Other tools'
+# rules (Read, Edit...) are ignored: trust the folder for those.
+claude_settings = [
+    'C:\Users\me\Documents\ReclaimerForge',
+]
+
+[commands]
+# Commands that never ask. Patterns match the whole command: * is anything, a trailing " *" also
+# matches the bare command, spacing doesn't matter, and PowerShell is matched case-insensitively.
+# In a chained command (; && || | or new lines) every part must match a rule or only look at
+# things, so "git log; rm -rf C:/x" still asks. A command that runs other code inside itself
+# ($(...), backticks, PowerShell's ( ) and { }) or redirects to a file isn't covered.
+# Allow rules never override: power, disk and hidden-code commands, secret folders (.ssh, .claude
+# and the like), Jarvis's own program folder, machines Jarvis hasn't used before, the always-ask
+# rules here, or standing orders (which only go by their charter).
+allow = [
+    "git *",
+    "npm test",
+    "wsl -d Ubuntu *",
+]
+# Commands that always ask, even read-only ones or ones a rule above allows. These match anywhere
+# in a command, including each part of a chain and inside quotes.
+always_ask = [
+    "git push *",
+    "Stop-Process *",
+]

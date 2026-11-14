@@ -1,0 +1,96 @@
+# Jarvis's charter: the standing orders it carries out on its own (agency.py).
+#
+# Copy this file to ~/.jarvis/charter.toml and edit it there. Jarvis can't read or write that folder;
+# only you change the charter. Whenever it changes, new and changed orders wait until you say yes to
+# one question, at the PC or on a paired screen (never by text or on a call). Removing an order
+# takes effect at once. "Pause your standing orders" (or `jarvisctl pause`) stops them all;
+# "resume your standing orders" (at the PC or in the browser) or `jarvisctl resume` starts them again.
+#
+# Inside an order Jarvis is stricter than in conversation: only read-only commands, what the order's
+# `needs` grant, and its free zone go ahead without asking. Trust mode, your "always" rules and the
+# safety check don't apply. Its questions wait at most ask_timeout_minutes (no answer is a no), and
+# in quiet hours it doesn't ask at all (the answer is no). The journal of everything orders do is
+# ~/.jarvis/agency/journal.jsonl.
+
+[agency]
+# When orders must not ask or tell you anything ("HH:MM-HH:MM", may cross midnight; "" for none).
+# Orders still run in quiet hours; anything that would need you is a no and goes in the daily summary,
+# and their reports (and a summary due then) are held and told together when quiet hours end. Your
+# own tasks' news is never held.
+quiet_hours = "22:30-07:00"
+# At most this many worker sessions a day, all orders together. Each worker an order starts counts,
+# a retry after the checker turns its report down included; a quick check that finds nothing starts
+# none. Once it's used up, no order starts until tomorrow.
+max_worker_runs_per_day = 24
+# At most this many tool calls an hour by orders' workers, all orders together.
+max_actions_per_hour = 100
+# How long an order's question waits for your answer before it counts as a no.
+ask_timeout_minutes = 30
+# When to tell you what the orders did, decided not to do, and want permission for ("" for never).
+summary_at = "21:00"
+
+# Each [[order]] is one standing order.
+#   name      1-32 lowercase letters, digits or dashes. Its grants are kept as task "order-<name>".
+#   kind      backup | machines | mail | brief: what the order is for. Each run starts with a quick
+#             check by Jarvis itself, and only when that finds something does a worker (Claude) look
+#             closer and tell you:
+#               backup    the paths' newest file is recent and not empty; check/probes succeed.
+#               machines  each machine answers over ssh, its check/probes succeed (default: uptime
+#                         and df -h), and no disk is 90% full.
+#               mail      new unread mail in the inbox (headers only, nothing marked read); the
+#                         worker reads, never sends, moves, flags or marks anything.
+#               brief     always: tasks, questions waiting for you and what the orders want; with
+#                         the calendar set up, a worker adds today's events. Said like task news.
+#   schedule  "daily HH:MM", "weekdays HH:MM" (Monday to Friday), or "every Nm" / "every Nh"
+#             (at least every 5 minutes). Local time, 24-hour. A run missed by less than 3 hours
+#             (Jarvis was off, or another order was running) is caught up; older ones are skipped.
+#             A new order first runs at its next scheduled time.
+#   check     optional: a command (or list of commands) that shows whether all is well, e.g. a
+#             listing of the backup folder. Must be read-only (the commands Jarvis runs without asking:
+#             ls, cat, df, docker ps, journalctl...), with no pipes, ; or redirection, nothing protected.
+#   probes    optional: a list of more read-only commands like check. Both run on each of the
+#             order's machines over ssh, or on this PC when it lists none.
+#   paths     backup only: full paths of backup files or folders (on each machine, or this PC). For
+#             a folder, its newest file counts.
+#   max_age_hours  backup only: how old the newest backup may be (default 26).
+#   min_size_mb    backup only: the smallest a backup file may be (default: anything but empty).
+#   machines  optional: machines the order looks at, by name; each must be one of Jarvis's machines
+#             (mcp__machines__list_machines; add_machine first).
+#   needs     optional: what it may do without asking, granted when you adopt the charter, as for a
+#             task: { folders = [full paths], machines = [names], commands = ["docker restart", ...] }.
+#             Interpreters, chained commands, deletes, installs and always-ask commands can't be granted.
+#   model     opus | sonnet | haiku (default sonnet).
+#   allow     optional: what its worker may use, instead of the kind's default. MCP servers: machines,
+#             time, mail, calendar, codex; built-in tools: Read, Glob, Grep, WebSearch, WebFetch,
+#             Write, Edit, and "shell" (Bash, plus PowerShell on Windows). Orders never get
+#             subagents, and with mail or calendar every write (send, move, flag, delete...) is off.
+
+[[order]]
+name = "nas-backup"
+kind = "backup"
+schedule = "daily 06:30"
+machines = ["nas"]
+paths = ["/mnt/backups"]
+max_age_hours = 26
+probes = ["df -h /mnt/backups"]
+model = "haiku"
+
+[[order]]
+name = "homelab"
+kind = "machines"
+schedule = "every 4h"
+machines = ["nas"]
+probes = ["df -h", "docker ps", "uptime"]
+needs = { machines = ["nas"], commands = ["docker restart"] }
+
+[[order]]
+name = "mail-triage"
+kind = "mail"
+schedule = "every 2h"
+model = "haiku"
+
+[[order]]
+name = "morning-brief"
+kind = "brief"
+schedule = "weekdays 07:15"
+allow = ["calendar", "mail", "time", "WebSearch"]

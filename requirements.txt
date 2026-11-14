@@ -1,0 +1,26 @@
+# Python 3.11+. Linux: install into a virtual environment, and for voice mode also PortAudio from
+# the system (Debian/Ubuntu: sudo apt install libportaudio2). The GPU builds below fall back to the
+# CPU on a machine without an NVIDIA GPU, on Linux and Windows alike.
+claude-agent-sdk
+# Phase 2: voice
+faster-whisper
+openwakeword
+kokoro-onnx
+sounddevice
+numpy
+# GPU speech-to-text (NVIDIA). Without these, Whisper falls back to CPU.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12>=9,<10
+# GPU text-to-speech (Kokoro). kokoro-onnx, openwakeword and faster-whisper also pull in the
+# CPU-only "onnxruntime", which shares its files. After installing, remove it and restore this:
+#   pip uninstall -y onnxruntime
+#   pip install --force-reinstall --no-deps onnxruntime-gpu==1.31.1
+onnxruntime-gpu[cuda,cudnn]==1.31.1
+# Phase 3: MCP servers
+mcp-server-time
+# Phone (phone.py) and the browser interface (web.py)
+httpx
+scipy
+starlette
+uvicorn
+websockets

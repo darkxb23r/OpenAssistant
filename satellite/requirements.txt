@@ -1,0 +1,8 @@
+# A voice satellite: the wake word and VAD run here; hearing and speaking are the core's.
+# Python 3.11+. Linux also needs PortAudio from the system (sudo apt install libportaudio2).
+numpy
+sounddevice
+openwakeword      # pulls in onnxruntime (the CPU build is enough here)
+websockets
+httpx
+av                # PyAV: plays the core's voice when it's ElevenLabs (MP3); Kokoro's WAV needs nothing

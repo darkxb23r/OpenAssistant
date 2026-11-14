@@ -1,0 +1,63 @@
+__pycache__/
+*.pyc
+# Downloaded on first run (voice.py); too big for git.
+models/
+# The browser interface (web/): installed packages, build output, and the copied MediaPipe runtime.
+web/node_modules
+web/dist/
+web/public/mediapipe/
+web/*.local
+# A virtual environment made in the project folder (the Linux setup suggests one).
+.venv/
+venv/
+# Written by jarvisctl install-service (the Windows Task Scheduler task); machine-specific.
+service/
+
+# --- Secrets, settings and memory: never in git ------------------------------------------------
+# OpenAssistant keeps all of these in ~/.jarvis, outside the project; these lines are a backstop in
+# case a copy lands here (or a home folder is set to the project for testing).
+.jarvis/
+secrets.env
+*.secrets.env
+.env
+.env.*
+!.env.example
+!web/.env.example
+# Settings, rules and memory (the *.example.toml files are the documented templates and stay)
+memory.md
+charter.toml
+permissions.toml
+approved.txt
+free-zones.txt
+trusted-folders.txt
+machines.json
+devices.json
+control.token
+scheduled-calls.json
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# --- Virtual environments and installed packages ------------------------------------------------
+.venv*/
+venv*/
+env/
+node_modules/
+
+# --- Logs, run state and generated files ---------------------------------------------------------
+logs/
+*.log
+*.diff
+*.tmp
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Editors and OS ------------------------------------------------------------------------------
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

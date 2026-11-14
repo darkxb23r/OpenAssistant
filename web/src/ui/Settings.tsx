@@ -13,7 +13,7 @@ import { MEANING_MAX } from '../lib/identity'
  *
  * Secrets are input only: the core never sends their values, so this panel can only say whether
  * one is set, replace it, or clear it. A field left empty is left as it is. Changes take effect
- * when Jarvis restarts, which the panel offers once something has been saved.
+ * when Jarvis restarts: the panel's restart button, always there, stands out once something is saved.
  */
 export function Settings({ onClose }: { onClose: () => void }) {
   const [fields, setFields] = useState<SettingField[] | null>(null)
@@ -171,11 +171,18 @@ export function Settings({ onClose }: { onClose: () => void }) {
             <span className="settings-note" role="status">
               {note}
             </span>
-            {saved && (
-              <button type="button" onClick={() => restartCore() && setNote('Restarting Jarvis…')}>
-                RESTART JARVIS
-              </button>
-            )}
+            <button
+              type="button"
+              className={saved ? 'settings-restart-due' : undefined}
+              title={saved ? 'Saved settings apply after a restart' : 'Restart Jarvis'}
+              onClick={() =>
+                window.confirm('Restart Jarvis now? Anything he is doing in the background stops.') &&
+                restartCore() &&
+                setNote('Restarting Jarvis…')
+              }
+            >
+              RESTART JARVIS
+            </button>
             <button type="submit" disabled={!pending}>
               SAVE{pending ? ` (${pending})` : ''}
             </button>

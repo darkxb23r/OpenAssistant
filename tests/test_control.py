@@ -66,6 +66,10 @@ async def main():
             # Stop and restart only set the events the main loop waits on.
             assert (await post("stop")).json() == {"stopping": True} and stop.is_set()
             assert (await post("restart")).json() == {"restarting": True} and j._restart.is_set()
+            assert not j.FRESH_FILE.exists()
+            assert (await post("restart", new=True)).json() == {"restarting": True, "new": True}
+            assert j.FRESH_FILE.exists()                       # the next start is a fresh one
+            j.FRESH_FILE.unlink()
 
         # jarvisctl, against the running core.
         jarvisctl.PORT = port

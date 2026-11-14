@@ -5,7 +5,7 @@ Control a running Jarvis core from this PC (or over SSH: `ssh host python3 jarvi
     jarvisctl.py status                 what's running, who's connected, open questions, tasks, orders
     jarvisctl.py pause | resume         standing orders off / on (works even when the core is down)
     jarvisctl.py standby on|off
-    jarvisctl.py stop | restart
+    jarvisctl.py stop | restart         restart --new: a fresh conversation, saving memories first
     jarvisctl.py attach [--name NAME]   talk to Jarvis in this terminal (needs `websockets`)
     jarvisctl.py pair [--name NAME] [--kind face|satellite]
                                         a one-time code to pair a browser (face, the default) or a
@@ -311,8 +311,11 @@ def main(argv: list[str]) -> int:
             call("standby", {"on": on})
             print("On standby." if on else "Off standby.")
         elif cmd in ("stop", "restart"):
-            call(cmd)
-            print("Stopping Jarvis." if cmd == "stop" else "Restarting Jarvis.")
+            fresh = cmd == "restart" and "--new" in rest
+            call(cmd, {"new": True} if fresh else None)
+            print("Stopping Jarvis." if cmd == "stop" else
+                  "Restarting Jarvis with a fresh conversation (he saves what's worth keeping first)." if fresh
+                  else "Restarting Jarvis.")
         elif cmd == "pair":
             kind = option(rest, "--kind", "face")
             if kind not in PAIR_KINDS:

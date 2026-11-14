@@ -3,6 +3,8 @@ import { getMic } from './audio'
 import { speakingNow, speakingSince } from './tts'
 import { startVad, type Vad } from './vad'
 import { caps } from './capabilities'
+import { afterWake, isOverride, isWake } from './wake'
+export { setCallName, stripCall } from './wake'
 
 /**
  * The voice loop.
@@ -69,72 +71,6 @@ export type Voice = {
 /** One utterance often produces several partials containing his name. */
 const WAKE_DEBOUNCE = 1500
 
-/**
- * His name, and the only wake phrase.
- *
- * The optional prefix is genuinely optional: addressing him by name alone is
- * correct, and during an answer "Jarvis" on its own is the natural way to cut
- * in. The negative lookahead keeps possessives ("Jarvis's job") from waking him.
- *
- * The alternates are not padding. "Jarvis" is not in a general dictation
- * model's high-frequency vocabulary, and Chrome routinely returns Travis,
- * Jervis, Jarvys or Java's for a perfectly clear utterance — every one of which
- * used to be silently discarded, so the wake word "just didn't work" with no
- * indication why. Better a rare false wake than a name that does not answer.
- */
-const JARVIS =
-  "jarvis|jarvys|jervis|jarvis's|travis|jarviss|java's|jarv|javis|jarvus|jarvas|jarves|j\\.a\\.r\\.v\\.i\\.s"
-/** How he's casually called: "hey", "morning", "you there", "excuse me"... */
-const GREETING =
-  '(?:hey|hi|hello|ok|okay|yo|oi|alright|right|morning|evening|afternoon|' +
-  'good (?:morning|afternoon|evening)|excuse me|(?:are )?you there)'
-/**
- * His name, anywhere in what was said, with a greeting before it if there is
- * one. Anywhere, so he can be called the way people call each other — "Morning
- * Jarvis", "Jarvis, you there?", "check the NAS, Jarvis" — at the cost of the
- * occasional wake when someone in the room talks about him.
- */
-let WAKE = wakeFor('')
-
-/** His name, and Jarvis (still answered to, out of habit), as a regex alternative. */
-function names(name: string): string {
-  const own = name && name.toLowerCase() !== 'jarvis' ? `${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|` : ''
-  return `(?:${own}${JARVIS})`
-}
-
-function wakeFor(name: string): RegExp {
-  return new RegExp(`\\b(?:${GREETING}[\\s,.!?]*)?${names(name)}\\b(?!'s)`, 'i')
-}
-
-function overrideFor(name: string): RegExp {
-  return new RegExp(`\\b(stop|wait|${names(name)}|cancel|enough|quiet|hold on|shut up|never ?mind|forget it|no)\\b`, 'i')
-}
-
-/** What he's called (identity.py): from now on that's the wake word, and it cuts through too. */
-export function setCallName(name: string): void {
-  WAKE = wakeFor(name)
-  OVERRIDE = overrideFor(name)
-}
-/** What's left of a call that asks nothing: "you there?", "buddy". */
-const CALL_ONLY = /^(?:(?:are )?you (?:there|around|awake|up)|buddy|mate|my friend|old friend|sir|please)?[\s,.!?]*$/i
-
-/**
- * What was said with the call taken out: the command, wherever the name was.
- * "" when it was only a call; the text unchanged when it didn't name him.
- */
-export function stripCall(text: string): string {
-  const m = WAKE.exec(text)
-  if (!m) return text.trim()
-  const before = text.slice(0, m.index).replace(/[\s,;:-]+$/, '')
-  const after = text.slice(m.index + m[0].length).replace(/^[\s,.:;!?-]+/, '')
-  const rest = [before, after].filter(Boolean).join(' ').trim()
-  return CALL_ONLY.test(rest) ? '' : rest
-}
-
-/** The command that came with the wake word, if any. */
-function afterWake(text: string): string {
-  return WAKE.test(text) ? stripCall(text) : ''
-}
 
 // ---------------------------------------------------------------------------
 // Assembling one utterance out of several segments
@@ -221,7 +157,7 @@ function holdFor(text: string): number {
   if (CONTINUES.test(words[words.length - 1])) return CONTINUE_MS
   // One or two words is usually the start of something, not the whole of it —
   // except for the short commands that genuinely are complete.
-  if (words.length <= 2 && !OVERRIDE.test(text)) return CONTINUE_MS
+  if (words.length <= 2 && !isOverride(text)) return CONTINUE_MS
   return SETTLE_MS
 }
 
@@ -308,13 +244,6 @@ const norm = (s: string) =>
     .trim()
 
 /**
- * Short words that must always cut through, even when they collide with what
- * he happens to be saying. Suppressing "stop" because he just said "stop"
- * would be the single most infuriating failure this file could have.
- */
-let OVERRIDE = overrideFor('')
-
-/**
  * Words too common to be evidence of anything.
  *
  * This set is the difference between a usable filter and an infuriating one.
@@ -341,7 +270,7 @@ const STOP = new Set(
  */
 function isEcho(heard: string, spoken: string): boolean {
   if (!spoken) return false
-  if (OVERRIDE.test(heard)) return false
+  if (isOverride(heard)) return false
 
   const all = norm(heard).split(' ').filter(Boolean)
   if (!all.length) return true
@@ -542,7 +471,7 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
       diag.heardAt = Date.now()
 
       if (mode === 'wake') {
-        if (WAKE.test(said) && Date.now() - lastWake > WAKE_DEBOUNCE) {
+        if (isWake(said) && Date.now() - lastWake > WAKE_DEBOUNCE) {
           lastWake = Date.now()
           diag.wakes++
           diag.dropped = ''
@@ -727,7 +656,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     diag.heardAt = Date.now()
     if (mode === 'wake') {
       assemble.cancel()
-      if (WAKE.test(text) && Date.now() - lastWake > WAKE_DEBOUNCE) {
+      if (isWake(text) && Date.now() - lastWake > WAKE_DEBOUNCE) {
         lastWake = Date.now()
         diag.wakes++
         diag.dropped = ''
@@ -778,7 +707,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
 
     if (mode === 'wake') {
       settled += fresh
-      if (WAKE.test(heard) && Date.now() - lastWake > WAKE_DEBOUNCE) {
+      if (isWake(heard) && Date.now() - lastWake > WAKE_DEBOUNCE) {
         lastWake = Date.now()
         diag.wakes++
         const trailing = afterWake(heard)
@@ -797,7 +726,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       if (mode === 'guard') {
         // An override word cuts through everything below it — "stop" has to
         // work on the first syllable or it is not a stop button.
-        if (!OVERRIDE.test(full)) {
+        if (!isOverride(full)) {
           // His own first syllable, same as the premium path. This engine has
           // no energy gate, so without the clock the only defence is the word
           // count below, and a single clear word is exactly what leaks first.

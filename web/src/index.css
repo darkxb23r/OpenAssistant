@@ -2112,3 +2112,8 @@ kbd {
   flex: 1;
   font-size: 11px;
 }
+/* Saved settings wait for a restart: the button says so. */
+.settings-foot .settings-restart-due {
+  border-color: var(--accent, currentColor);
+  box-shadow: 0 0 8px var(--accent, currentColor);
+}

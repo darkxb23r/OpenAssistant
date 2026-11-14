@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 import permissions
+import provider
 
 log = logging.getLogger("jarvis.permissions")
 
@@ -778,14 +779,31 @@ REMOTE_COMMAND = re.compile(
 
 
 # --- projects that follow their own Claude Code settings (permissions.toml [folders] claude_settings) ---
-def settings_project(cmd: str) -> Path | None:
-    """The followed project a command runs in: it starts with one cd into it and changes folder
-    nowhere else (like works_in_free_zone)."""
+def runs_in(cmd: str) -> Path | None:
+    """Where a command runs: it starts with one absolute cd and changes folder nowhere else."""
     base = cd_target(cmd)
     if not base or len(CD_ANYWHERE.findall(cmd)) != 1 or not is_absolute(base):
         return None
-    where = resolve(base)
-    return next((f for f in CLAUDE_SETTINGS_FOLDERS if where.is_relative_to(f)), None)
+    return resolve(base)
+
+
+def settings_project(cmd: str) -> Path | None:
+    """The followed project a command runs in (runs_in)."""
+    where = runs_in(cmd)
+    return next((f for f in CLAUDE_SETTINGS_FOLDERS if where.is_relative_to(f)), None) if where else None
+
+
+def folder_trusts(cmd: str) -> str | None:
+    """Working in a free zone or trusted folder is trusted like trust mode, there and for good: a
+    command that runs in one (runs_in) is allowed once nothing harder asks. decide() asks this only
+    where location_check said "check", so the floor (secrets, power, disks, the project, unclear
+    remoting), new machines, machine-wide changes off a VM and deletes outside the zones still ask,
+    exactly what trust mode leaves to a question. As with trust mode, what the command runs can
+    reach further: that is the accepted tradeoff of trusting the folder."""
+    where = runs_in(cmd)
+    if where is None or not in_free_zone(str(where), allow_root=True):
+        return None
+    return f"working in {where}"
 
 
 def _after_cd(cmd: str) -> str:
@@ -1120,7 +1138,7 @@ async def judged_safe(tool_name: str, cmd: str) -> bool:
         max_turns=1,
         cwd=str(JARVIS_HOME),
         setting_sources=[],
-        env={"ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
+        env={"ENABLE_CLAUDEAI_MCP_SERVERS": "false", **provider.env()},
     )
     verdict = ""
     try:
@@ -1303,7 +1321,8 @@ async def decide(tool_name, tool_input, context):
                 return auto_allow("free zone", cmd)
             if verdict == "check" and not new_hosts and remote_read_only(cmd):
                 return auto_allow("read-only on a handed-over machine", cmd)
-            if verdict == "check" and not new_hosts and attended and (because := project_allows(tool_name, cmd)):
+            if verdict == "check" and not new_hosts and attended and (because := project_allows(tool_name, cmd)
+                                                                       or folder_trusts(cmd)):
                 return auto_allow(because, cmd)
             hard = verdict == "ask"
         if not hard:

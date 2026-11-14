@@ -31,6 +31,7 @@ from claude_agent_sdk import (
 )
 
 import guardrails
+import provider
 from guardrails import JARVIS_HOME, WORKSPACE
 
 log = logging.getLogger("jarvis.tasks")
@@ -214,7 +215,7 @@ async def _work(task: Task, step: Step, server, brief: str, outcome: dict) -> No
 
 async def verify(step: Step, summary: str, evidence: str) -> tuple[bool, str]:
     options = ClaudeAgentOptions(system_prompt=VERIFY_PROMPT, model="haiku", tools=[], max_turns=1,
-                                 cwd=str(JARVIS_HOME), setting_sources=[], env={"ENABLE_CLAUDEAI_MCP_SERVERS": "false"})
+                                 cwd=str(JARVIS_HOME), setting_sources=[], env={"ENABLE_CLAUDEAI_MCP_SERVERS": "false", **provider.env()})
     verdict = ""
     try:
         async with asyncio.timeout(120):

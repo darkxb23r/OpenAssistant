@@ -106,8 +106,9 @@ asyncio.run(proxy_checks())
 
 # The launch: Chromium headless, own profile, behind the proxy, loopback through it too, DevTools
 # on a random 127.0.0.1 port; Playwright pinned and driving that Chromium.
-cmd = b.chromium_command(Path("/pw/chromium-1254/chrome-linux64/chrome"), 4242)
-assert cmd[0] == "/pw/chromium-1254/chrome-linux64/chrome" and cmd[-1] == "about:blank"
+chrome = Path("/pw/chromium-1254/chrome-linux64/chrome")
+cmd = b.chromium_command(chrome, 4242)
+assert cmd[0] == str(chrome) and cmd[-1] == "about:blank"      # str(): backslashes on Windows
 for flag in ("--headless=new", "--proxy-server=http://127.0.0.1:4242", "--proxy-bypass-list=<-loopback>",
              "--disable-quic", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
              f"--user-data-dir={home / '.jarvis' / 'browser' / 'profile'}"):

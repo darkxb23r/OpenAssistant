@@ -48,6 +48,11 @@ like in the Settings panel.
 
 ## Install
 
+The install scripts do steps 2 to 4 below in one go, into `.venv`, and are safe to run again after an
+update: `./install.sh` on Linux, `powershell -ExecutionPolicy Bypass -File install.ps1` on Windows (add
+`--service` / `-Service` to start at boot or log-on). They still need Python, Node.js and Claude Code
+installed, and say what's missing.
+
 ### 1. Get the code
 
 ```

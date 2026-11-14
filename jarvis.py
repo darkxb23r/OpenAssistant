@@ -33,6 +33,7 @@ if sys.version_info < (3, 11):
 import guardrails
 import identity
 import knowledge
+import provider
 from guardrails import (
     APPROVED_FILE,
     AUTO_APPROVED,
@@ -196,27 +197,26 @@ How you talk:
 - Polished, calm, and quietly witty, like a seasoned butler who happens to run a computer:
   courteous and precise, never gushing or chatty. A dry remark now and then is welcome, never
   at the user's expense.
-- You're heard, not read: talk the way a person talks across the room, not the way a report is
-  written. Usually one short sentence, two at most, around twenty-five words, unless they ask
-  for detail. No markdown, no lists.
-  - Lead with the answer, in plain words. Use contractions.
-  - Give the gist, not the inventory: the one thing that matters, not every fact you found. If
-    there's more, they can ask.
-  - Don't read out identifiers: no commit hashes, file names, paths, branch names, version
-    numbers, IP addresses or code names unless they asked for one. Say "the old server", "the
-    report", "your project folder".
-  - Don't recount how the work was done (what an agent read, ran or checked), don't restate
-    the user's instructions or your rules back to them, and don't list what you didn't do
-    ("nothing was installed or changed") unless they asked.
-  - When something needs a decision, end with that one question.
-  For example, not "Cancelled. I stopped the last VPS check, and nothing was installed, copied
-  or changed on the VPS or the old server. Everything was read-only, so there's nothing to
-  undo." but "Cancelled." Not "Prefab support is built but not live yet. It sits on the local
-  branch prefab-support-main as one commit, 7057f6c." but "Prefab support's built, just not
-  merged. Shall I merge it?" Not "Got it. I'll stop checking in and just run what I need. The
-  block on deletions outside the project stays, as you said..." but "Understood." Not "I've
-  started three read-only checks in parallel. They cover how the old server runs..." but
-  "On it."
+- You're speaking out loud to someone in the room, not writing. Talk like a person: short,
+  natural sentences with contractions, usually one or two. If it would sound odd said aloud,
+  don't say it.
+  - Answer first, then stop. The one thing that matters, not everything you found; if there's
+    more, offer it in a few words ("Want the rest?").
+  - Nothing that only works on a screen: no markdown, lists, symbols, code, links, web
+    addresses, file names, paths, hashes, IDs, version numbers, or counts nobody asked for. Say
+    it the way you'd say it: "the prefab filter", "the old server", "your project folder".
+  - Sound alive, not like a report: a quick, genuine reaction is welcome ("Oh, nice.", "Huh,
+    that's odd.", "Ah, that one."), a brief opinion when it helps, and different wording from
+    one reply to the next.
+  - Don't recount how the work went (what you clicked, read, ran or checked), don't restate
+    their request or your rules, and don't list what you didn't do.
+  Real replies, and what they should have been: not "The Prefabs filter works on the live site.
+  I opened the site, ticked Prefabs in the Content type list, and the address changed
+  to file_type=prefab. It has one listing out of 80." but "Works, sir. There's just one prefab
+  up so far, the huge hangar." Not "The researcher is looking up the Mailcow details. It's
+  checking the address format and the safest setup. I'll report when it's back." but "On it."
+  Not "Cancelled. I stopped the last check, and nothing was installed or changed." but
+  "Cancelled."
 - Dates and times only as precise as the moment needs. Within the next week or so, say it
   relative to today: "today", "tomorrow", "this Wednesday", "next Friday". Further out, the day
   and date, like "Friday the 13th", adding the month or year only when it isn't obvious. Add a
@@ -234,14 +234,16 @@ How you talk:
   next steps and take them; don't ask the user to confirm routine choices, small steps, or
   things they've already asked for, and don't check in midway. Ask only when it's genuinely
   their call: something hard to undo, money, other people, or a real fork in what they want.
-- Be curious when they're vague, the way a person would be. If what they want, which one, or
-  what it's for isn't clear and a wrong guess would waste their time, ask one short, open
-  question about what they're after, out of interest rather than procedure: not "Could you
-  clarify your request?" or a menu of options, and never several questions at once. When
-  there's an obvious reading, or a wrong guess is cheap to put right, just get on with it; once
-  you know, stop asking. For example, "Can you look into the server?" gets "Sure, what's it
-  doing?"; "Find me a good laptop" gets "What'll you mostly use it for?"; "I'm bored" gets
-  "Feel like a film, or something to tinker with?"
+- When they're open-ended or vague, never ask them to clarify, and never offer a menu ("Do you
+  mean X or Y?"). Take the most likely meaning and either get on with it, or ask the one
+  question a curious friend who knows them would ask: about the thing itself, specific to what
+  they said, the kind they'll want to answer. One question, then listen. For example, "How do I
+  add calendar support?" (you already have their calendar) gets "You've already got me on your
+  SOGo calendar, sir. Something you want me doing with it?"; "I've been thinking about a new
+  server" gets "Oh? Outgrown the old one, or got something new in mind?"; "What do you think
+  about AI?" gets a short view of your own, then "What's got you thinking about it?"; "Find me a
+  good laptop" gets "What'll it mostly be doing?"; "I'm bored" gets "Feel like a film, or
+  something to tinker with?"
 - When a background job finishes (a subagent, a command, a stopped task), you decide whether
   it's worth saying anything. If it's a step along the way, a check that found nothing, a job
   you stopped, or news you've already given, keep going or stay quiet: reply with exactly
@@ -260,8 +262,10 @@ How you work:
   shell commands can run in the background too. If asked, say what's still running.
 - You may create, change, and delete things freely in your free zone: {free_zone}.
   Use absolute paths when deleting; relative paths need the user's OK. For shell work in one of
-  those folders, start the command with `cd <the folder's full path> &&` (one cd only) and keep
-  every path inside the folder: such commands run without asking, like edits there.
+  those folders, start the command with `cd <the folder's full path> &&` (one cd only): then
+  whatever you run there goes ahead without asking, like edits there. Still asking: secret
+  folders, power and disks, system-wide changes like sudo, new machines, and deleting things
+  outside your folders.
 - To install or remove software without needing the user, keep it in your free zone: use a
   {installs} Other installs and uninstalls need their OK.
 - When the user asks you to take over a folder, add it with add_free_zone. They confirm it.
@@ -927,7 +931,7 @@ def detect_caveman(start_timeout_s: float = 15) -> bool:
     and never stopped by Jarvis: the user's own Claude Code goes through it too."""
     global caveman_on
     caveman_on = False
-    if not CAVEMAN_MCP.exists():
+    if not CAVEMAN_MCP.exists() or provider.local():   # its proxy forwards to Anthropic
         return False
     if not _proxy_listening() and (cli := shutil.which("caveman")):
         flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
@@ -944,6 +948,10 @@ def detect_caveman(start_timeout_s: float = 15) -> bool:
 
 
 def caveman_env() -> dict:
+    """Where Claude Code sends requests: Ollama when local models are on (provider.py), else
+    the Caveman proxy when it's running, else Claude directly."""
+    if provider.local():
+        return provider.env()
     if not caveman_on:
         return {}
     host, port = CAVEMAN_PROXY
@@ -1064,6 +1072,61 @@ def build_options(new_conversation: bool) -> ClaudeAgentOptions:
     )
 
 
+# --- starting a fresh conversation: never without saving what's worth keeping ---------------------
+# The conversation is the only place most of what Jarvis knows lives, so --new (or `jarvisctl
+# restart --new`) first reopens it with nothing but the memory tools and has him save the lasting
+# facts to memory.md. If that fails, the old conversation is kept rather than lost.
+FRESH_FILE = JARVIS_HOME / "fresh-start"   # `jarvisctl restart --new`: start fresh at the next start
+SAVE_TIMEOUT_S = 5 * 60
+SAVE_BEFORE_FRESH = """[Before a fresh start] This conversation is about to be closed for a new one, and nothing \
+in it carries over except your long-term memory. Save with the remember tool every lasting fact worth \
+keeping: about the user (how they like things done, preferences, people, routines), their projects \
+and machines (names, where they live, what state they're in, what's planned), and decisions made. One \
+short fact per call. Never passwords, keys, tokens, codes or anything else secret. Skip what's already \
+remembered (below) and what's only true right now. When you've saved everything, reply DONE.
+
+Already remembered:
+{memory}"""
+
+
+def session_dir() -> Path:
+    """Where Claude Code keeps the conversations started in WORKSPACE."""
+    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(WORKSPACE.resolve()))
+
+
+async def save_before_fresh_start() -> bool:
+    """Have Jarvis save the old conversation's lasting facts to memory. True if done (or there's no
+    old conversation), False if it failed."""
+    if not any(session_dir().glob("*.jsonl")):
+        return True
+    options = build_options(False)
+    options.mcp_servers = {"memory": MCP_SERVERS["memory"]}
+    options.allowed_tools = ["mcp__memory__remember", "mcp__memory__forget"]
+    options.tools = []   # no built-in tools: reading files or running commands isn't part of this
+    options.agents = None
+    options.include_partial_messages = False
+    options.max_turns = 60
+
+    async def only_memory(tool_name, tool_input, context):
+        return PermissionResultDeny(message="Only saving to memory now.")
+
+    options.can_use_tool = only_memory
+    before = len(read_memory())
+    print("   [saving what I've learned before starting fresh...]")
+    try:
+        async with asyncio.timeout(SAVE_TIMEOUT_S):
+            async with ClaudeSDKClient(options=options) as saver:
+                await saver.query(SAVE_BEFORE_FRESH.format(memory="\n".join(read_memory()) or "(nothing yet)"))
+                async for msg in saver.receive_response():
+                    if isinstance(msg, ResultMessage) and msg.is_error:
+                        raise RuntimeError(guardrails.short(msg.errors or msg.result))
+    except Exception as e:
+        log.warning("couldn't save memories before a fresh start: %r", e)
+        return False
+    log.info("saved %d memories before a fresh start", len(read_memory()) - before)
+    return True
+
+
 def web_server(hub: Hub, speech: Speech, required: bool):
     """The browser interface's server. Each open tab becomes a channel of the hub. Without a
     local channel it's the only way in besides the phone, so a busy port stops Jarvis then."""
@@ -1089,7 +1152,13 @@ def prompt_for(text: str) -> str:
         now = _io.scene.describe(_io.display_target())
         if now != _screen_told:
             screen, _screen_told = f"[Screen: {now}] ", now
-    return f"[{spoken_now()}] {screen}{news}{text}"
+    return f"[{spoken_now()}] {screen}{news}{VOICE_NOTE} {text}"
+
+
+# A nudge on every line, because the conversation runs for days and its own long replies would
+# otherwise set the style more than the prompt does.
+VOICE_NOTE = ("[Say it out loud: a sentence or two, like a person in the room. No symbols, links or "
+              "file names. Vague? Ask the one curious question that fits what they said.]")
 
 
 def spoken_now() -> str:
@@ -1115,6 +1184,15 @@ async def listen(client: ClaudeSDKClient) -> None:
     pending = ""
     held: str | None = ""   # a text block's opening words, until they can't be QUIET (then None)
     quiet = False           # this text block is QUIET: say none of it
+    worked = False          # this turn has used a tool: text waits for the end of its message
+    writing, later = "", []   # ... the text block being written, and the finished ones waiting
+
+    def say_block(text: str) -> None:
+        text = text.strip()
+        if text and not text.startswith(QUIET):
+            for sentence in filter(None, map(str.strip, SENTENCE_END.split(text))):
+                _io.say(sentence)
+
     async for msg in client.receive_messages():
         from_subagent = getattr(msg, "parent_tool_use_id", None) is not None
         if isinstance(msg, StreamEvent):
@@ -1123,7 +1201,26 @@ async def listen(client: ClaudeSDKClient) -> None:
                 continue
             if _io.idle.is_set():   # speaking with no turn running: one Claude started itself
                 _io.begin_injected()
-            if event.get("type") == "content_block_delta" and event["delta"].get("type") == "text_delta":
+            kind = event.get("type")
+            if kind == "content_block_start" and (event.get("content_block") or {}).get("type") == "tool_use":
+                worked = True
+            elif kind == "content_block_delta" and event["delta"].get("type") == "text_delta" and worked:
+                # Once this turn has used a tool, what Claude writes waits for the end of its message:
+                # followed by another tool it was a running commentary ("Now I'm opening the filter"),
+                # and isn't said; otherwise it's the result, said in full.
+                writing += event["delta"]["text"]
+            elif kind == "content_block_stop" and worked:
+                if writing.strip():
+                    later.append(writing)
+                writing = ""
+            elif kind == "message_delta" and later:
+                if (event.get("delta") or {}).get("stop_reason") == "tool_use":
+                    log.info("not said (commentary between tools): %s", guardrails.short(" ".join(later), 200))
+                else:
+                    for text in later:
+                        say_block(text)
+                later = []
+            elif kind == "content_block_delta" and event["delta"].get("type") == "text_delta":
                 text = event["delta"]["text"]
                 if quiet:
                     continue
@@ -1139,7 +1236,7 @@ async def listen(client: ClaudeSDKClient) -> None:
                 *sentences, pending = SENTENCE_END.split(pending + text)
                 for sentence in filter(None, map(str.strip, sentences)):
                     _io.say(sentence)
-            elif event.get("type") == "content_block_stop":
+            elif kind == "content_block_stop":
                 said = pending + (held or "")
                 if said.strip() and not quiet:
                     _io.say(said.strip())
@@ -1175,6 +1272,9 @@ async def listen(client: ClaudeSDKClient) -> None:
                 guardrails.console("   [something went wrong on that one]")
             if not from_subagent:
                 health.turn_ended(msg)
+                for text in later:   # a message that ended without saying how (never a tool's turn)
+                    say_block(text)
+                worked, writing, later = False, "", []
             # The turn is over (a reply to a text goes back by text now). One Claude started itself
             # can't end the user's turn: it didn't start it.
             if not from_subagent and not (_injected(msg) and _io.turn is not None):
@@ -1292,8 +1392,11 @@ def control_commands(control_, hub: Hub, stop: asyncio.Event, server=None) -> No
 
     @control_.command("restart")
     async def restart(args):
+        if args.get("new"):   # a fresh conversation, after saving what's worth keeping
+            FRESH_FILE.write_text("", encoding="utf-8")
+        updater.request_restart("a fresh conversation" if args.get("new") else "jarvisctl restart")
         _restart.set()
-        return {"restarting": True}
+        return {"restarting": True, **({"new": True} if args.get("new") else {})}
 
     # Paired devices (devices.py): the interface's server holds them.
     @control_.command("pair")
@@ -1365,7 +1468,11 @@ async def main() -> int:
         sys.exit(f"unknown option {unknown[0]}; use --core (the default), --voice or --text, and --new")
     core = "--core" in args or not ("--voice" in args or "--text" in args)
     text_mode = "--text" in args and not core
-    new_conversation = "--new" in args
+    new_conversation = "--new" in args or FRESH_FILE.exists()
+    FRESH_FILE.unlink(missing_ok=True)
+    kept_old = False
+    if new_conversation and not await save_before_fresh_start():
+        new_conversation, kept_old = False, True   # never lose what it knew: carry on with the old one
     try:
         knowledge.ensure_vault()
     except OSError as e:   # a read-only or full disk mustn't keep Jarvis from starting
@@ -1373,7 +1480,9 @@ async def main() -> int:
     log.info("starting (%s mode%s)", "core" if core else "text" if text_mode else "voice",
              ", new conversation" if new_conversation else "")
     print(f"   [codex: {'on' if CODEX_ON else 'off (set JARVIS_CODEX=1 to use it)'}]")
-    print(f"   [caveman: {'on, through the local proxy' if detect_caveman() else 'off (proxy not running)'}]")
+    model_note = provider.start()
+    print(f"   [models: {provider.describe()}]")
+    print(f"   [caveman: {'on, through the local proxy' if detect_caveman() else 'off (local models, or proxy not running)'}]")
     log.info("caveman %s", "on" if caveman_on else "off")
 
     hub = Hub()
@@ -1418,6 +1527,10 @@ async def main() -> int:
             _io.say(note)
         _io.standby = STANDBY_FILE.exists()
         tasks.worker_options, tasks.say = worker_options, _io.notify
+        if model_note:   # local models asked for but not available: on Claude for now
+            _io.notify(model_note)
+        if kept_old:
+            _io.notify("I couldn't save my notes first, so I've kept our old conversation instead of starting fresh.")
         if resumed := tasks.resume_all():
             _io.notify(f"Picking up where I left off on {', '.join(resumed)}.")
         # Standing orders (agency.py) run in the core, the Jarvis that's always on.

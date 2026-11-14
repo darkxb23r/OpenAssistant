@@ -203,6 +203,20 @@ async def trusted_folders():
     # protected folders inside a trusted one stay protected
     assert g.in_free_zone(str(home / ".local" / "share" / "x"))
     assert await run("Write", {"file_path": str(home / ".local" / "share" / "keyrings" / "login.keyring")}) == "ask+deny"
+    # Working in a trusted folder is trusted like trust mode: whatever runs there, even reaching outside...
+    n = len(judge_calls)
+    for c in [f"cd {gb(bp)} && python build.py --out C:/Elsewhere/out", f"cd {gb(bp)}; $env:X = 1; ./run.ps1",
+              f"cd {gb(bp)} && curl -s http://127.0.0.1:8000/health && docker compose up -d"]:
+        assert await bash(c) == "allow", c
+    assert len(judge_calls) == n                                       # no safety check needed
+    # ... but not without the cd into it, not after leaving it, and never past what trust mode asks about
+    for c in [f"python {gb(bp)}/build.py --out C:/Elsewhere/out",       # not run in the folder
+              f"cd {gb(bp)}; cd C:/Elsewhere && make",                    # leaves it
+              f"cd {gb(bp)} && sudo make install",                        # machine-wide
+              f"cd {gb(bp)} && rm -rf C:/Elsewhere/stuff",                # a delete outside
+              f"cd {gb(bp)} && cat ~/.ssh/id_ed25519",                    # a secret
+              f"cd {gb(bp)} && shutdown /s"]:                             # power
+        assert await bash(c) == "ask+deny", c
 
 
 async def standing_orders():

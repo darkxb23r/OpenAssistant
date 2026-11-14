@@ -57,6 +57,23 @@ class FakeClaude:
                     ResultMessage("success", 1, 1, False, 1, "s", origin=origin)):
             await self._out.put(msg)
 
+    async def inject_work(self):
+        """A turn that works with tools, commenting between them, then gives its result."""
+        origin = {"kind": "task-notification"}
+        ev = lambda e: StreamEvent("u", "s", e)
+        text = lambda t: ev({"type": "content_block_delta", "delta": {"type": "text_delta", "text": t}})
+        tool = ev({"type": "content_block_start", "content_block": {"type": "tool_use", "name": "x"}})
+        stop = lambda why: ev({"type": "message_delta", "delta": {"stop_reason": why}})
+        block_end = ev({"type": "content_block_stop"})
+        for msg in (UserMessage("<task-notification>done</task-notification>", origin=origin),
+                    tool, block_end, stop("tool_use"),
+                    AssistantMessage([ToolUseBlock("t9", "Glob", {"pattern": "x"})], "sonnet"),   # as the CLI sends
+                    text("Now I'm opening the filter. "), text("Then I'll tick it."), block_end,
+                    tool, block_end, stop("tool_use"),
+                    text("It works. "), text("One listing so far."), block_end, stop("end_turn"),
+                    ResultMessage("success", 1, 1, False, 1, "s", origin=origin)):
+            await self._out.put(msg)
+
     async def interrupt(self):
         pass
 
@@ -116,6 +133,12 @@ async def main():
         # own, ends nobody's question, and the next question works as usual.
         await claude.inject("The scan is done.")
         assert json.loads(await frame()) == {"type": "say", "text": "The scan is done."}
+        await asyncio.sleep(0.1)
+        assert j._io.idle.is_set()
+        # Commentary between tool calls isn't said; the result after the last tool is, in full.
+        await claude.inject_work()
+        assert json.loads(await frame()) == {"type": "say", "text": "It works."}
+        assert json.loads(await frame()) == {"type": "say", "text": "One listing so far."}
         await asyncio.sleep(0.1)
         assert j._io.idle.is_set()
         # One Jarvis decides isn't worth saying (QUIET) says nothing at all; the next one is said.

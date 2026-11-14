@@ -8,7 +8,8 @@ cleared, never read back. Plain settings (the name, the voice, the mail host) ar
 Only the keys below can be written, each checked before it is: one line, no control characters,
 and a shape that fits (a phone number in +E.164, a PIN of digits, an https URL...). Nothing that
 widens Jarvis's powers lives in secrets.env (JARVIS_CONTAINED, JARVIS_WORKSPACE and the port are
-environment-only), so nothing here can either. The file is rewritten atomically, its other lines
+environment-only), so nothing here can either. The model settings (provider.py) choose where the
+conversation is sent, so they too are only for whoever may change these. The file is rewritten atomically, its other lines
 and comments kept, readable by the user only; the log names the keys changed, never the values.
 
 Who may: a face (web.py) the user is at, trust "physical" or "device" (the same as answering a
@@ -24,6 +25,7 @@ from pathlib import Path
 
 import identity
 import mcp_launch
+import provider
 
 log = logging.getLogger("jarvis")
 
@@ -78,6 +80,20 @@ FIELDS = {
                         "Asked for on calls in."),
     "JARVIS_CODEX": ("Coding", "Codex", False, _pattern(r"^[01]$", "on or off"),
                      "The coder uses Codex (needs `codex login`)."),
+    "MODEL_PROVIDER": ("Models", "Language models", False, _pattern(r"^(claude|ollama)$", "claude or ollama"),
+                       "claude: your Claude Code login. ollama: local models through Ollama 0.14 or newer."),
+    "OLLAMA_URL": ("Models", "Ollama address", False,
+                   lambda v: None if provider.URL.match(v) else "an http:// or https:// address, like http://localhost:11434",
+                   "Empty: http://localhost:11434."),
+    "OLLAMA_MODEL": ("Models", "Main model", False,
+                     lambda v: None if provider.MODEL_NAME.match(v) else "an Ollama model name, like qwen3-coder",
+                     "Conversation and most work. Needs good tool calling, and Ollama run with a 64k+ context (OLLAMA_CONTEXT_LENGTH=65536)."),
+    "OLLAMA_FAST_MODEL": ("Models", "Fast model", False,
+                          lambda v: None if provider.MODEL_NAME.match(v) else "an Ollama model name",
+                          "Quick jobs and the safety checks. Empty: the main model."),
+    "OLLAMA_BIG_MODEL": ("Models", "Big model", False,
+                         lambda v: None if provider.MODEL_NAME.match(v) else "an Ollama model name",
+                         "Planning and hard problems. Empty: the main model."),
 }
 MAX_VALUE = identity.MEANING_MAX   # the longest any setting may be
 

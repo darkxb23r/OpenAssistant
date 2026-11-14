@@ -8,6 +8,16 @@ cd %USERPROFILE%\Documents\Projects\OpenAssistant
 
 ## 1. One-time setup
 
+The quick way, which does every step below (and is safe to run again after an update):
+
+```
+powershell -ExecutionPolicy Bypass -File install.ps1      (Windows; add -Service to start at log-on)
+./install.sh                                             (Linux; add --service to start at boot)
+```
+
+It installs into `.venv`, so afterwards start Jarvis with `.venv\Scripts\python run_jarvis.py` (Windows) or
+`.venv/bin/python run_jarvis.py` (Linux), and the same for `jarvisctl.py`. By hand instead:
+
 Repeat after a fresh install or a package update.
 
 1. **Python packages**
@@ -56,7 +66,7 @@ python run_jarvis.py
 python run_jarvis.py --text
 ```
 
-Add `--new` to any of them to start a fresh conversation. With the phone set up, give it about a minute after startup before texting or calling Jarvis.
+Add `--new` to any of them to start a fresh conversation (or `python jarvisctl.py restart --new` while he's running). Before starting fresh he always saves what's worth keeping from the old one to his long-term memory, and if that fails he keeps the old conversation. With the phone set up, give it about a minute after startup before texting or calling Jarvis.
 
 ## 3. Controlling a running Jarvis
 
@@ -107,7 +117,26 @@ This registers a Windows Task Scheduler task that starts the core when you log o
 3. Jarvis asks once to adopt it, at the PC or in the browser. Any later change asks again.
 4. `python jarvisctl.py pause` stops them at any time.
 
-## 7. Permissions: fewer questions (optional)
+## 7. Local models through Ollama (optional)
+
+Jarvis can run on local models instead of Claude. In the interface's Settings panel, under Models, set
+**Language models** to `ollama`, give the **Main model** (and optionally a fast and a big one), then press
+**Restart Jarvis**. Everything uses them: the conversation, his agents, tasks, standing orders and the
+safety checks. If Ollama isn't answering or a model isn't pulled, he says so and uses Claude until it is.
+
+What it needs, or it won't work well:
+
+- **Ollama 0.14 or newer**, with the models pulled (`ollama pull <model>`).
+- **A context of at least 64,000 tokens.** His instructions and tools alone are about 40,000, and Ollama
+  often defaults to 16,000 or less, which silently cuts them off (he then forgets who he is and stops using
+  his tools). Start Ollama with `OLLAMA_CONTEXT_LENGTH=65536` set (Windows: a user environment variable,
+  then restart Ollama), and check with `ollama ps` that the CONTEXT column says so.
+- **A model that's good at tool calling,** and enough GPU memory for it plus that context. Small models
+  are slow at this size and weaker at judging which commands are safe, so the permission rules matter more.
+
+To go back, set Language models to `claude` and restart.
+
+## 8. Permissions: fewer questions (optional)
 
 Your own rules live in `%USERPROFILE%\.jarvis\permissions.toml` (`permissions.example.toml` explains every
 setting). Jarvis rereads it whenever it changes; no restart needed. Edit it by hand, or:

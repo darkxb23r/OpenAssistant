@@ -421,6 +421,7 @@ async def phone_and_charter():
     await asyncio.sleep(0.05)
     assert fake.texts[1:] == [p.ANSWER_ELSEWHERE] * 3 and not any("Reply YES" in t_ for t_ in fake.texts)
     assert q in g._pending_questions and not hearing.done()
+    p.call_greeting = lambda *a, **k: "Jarvis here."      # the greeting is picked at random
     fake.call = FakeCall()                                # the user calls: no question on the call
     await fake.inbox.put(("call_start",))
     await asyncio.sleep(0.05)

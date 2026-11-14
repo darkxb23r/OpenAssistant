@@ -281,7 +281,7 @@ async def main():
         code = devices.new_code("desk")
         desk = await connect(port, hello(pair=code))
         await until(lambda: hub.display_target() is not None, "the screen")
-        assert "[Screen: desk] what's on" in j.prompt_for("what's on")
+        assert "[Screen: desk] " in j.prompt_for("what's on")
         assert "[Screen:" not in j.prompt_for("and now")
         # A terminal is no screen: nothing changes.
         term = await connect(port, hello(token=token, client={"kind": "terminal", "name": "ssh"}, caps={}), origin=None)

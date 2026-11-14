@@ -18,10 +18,12 @@
 # backslash starts an escape, so you'd have to write C:\\Users\\me.
 
 [folders]
-# Like your free zone: Jarvis edits, deletes and runs commands in these without asking (a command
-# that starts with `cd <folder> &&` and keeps every path inside it). Protected folders inside stay
-# protected. Refused: protected folders, a whole drive, your home folder itself (or one holding
-# it), and any folder holding Jarvis's own program folder.
+# Like your free zone: Jarvis edits, deletes and runs commands in these without asking, as in trust
+# mode but only there: anything run with `cd <folder> &&` first goes ahead, except secret folders,
+# power and disks, system-wide changes (sudo, services, the registry), new machines, and deletes
+# outside your folders. Protected folders inside stay protected. Refused: protected folders, a
+# whole drive, your home folder itself (or one holding it), and any folder holding Jarvis's own
+# program folder.
 trusted = [
     'C:\Users\me\Projects\Beancount-Portable',
 ]

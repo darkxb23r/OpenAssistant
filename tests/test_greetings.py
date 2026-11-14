@@ -36,5 +36,7 @@ assert not any("Friday" in g for g in all_greetings(at(8, day=FRI - 1)))   # Thu
 
 import jarvis as j
 prompt = j.build_options(False).system_prompt
-assert "Be curious when they're vague" in prompt and "What'll you mostly use it for?" in prompt
+assert "never ask them to clarify" in prompt and "Outgrown the old one" in prompt
+j._io = None                                  # no channels yet
+assert j.VOICE_NOTE in j.prompt_for("hi") and j.prompt_for("hi").endswith("] hi")
 print("ALL OK")

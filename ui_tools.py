@@ -22,6 +22,7 @@ import time
 
 import browser_launch
 import browser_view
+import live_sources
 import web
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
@@ -605,8 +606,50 @@ async def browser_view_tool(args):
     return emit(browser_view.open_frame()) or ok("The browser is on the screen, live.")
 
 
+@tool("live_view",
+      "Show a live camera (or your browser) on the user's screen (show: true), or take it down (show: false). "
+      "`source` is one of the fixed ids; you never give an address. Use it when they ask to see a camera "
+      "live, e.g. \"show me the back door\". The cameras are Frigate's own (when this conversation began: "
+      + (", ".join(i for i in live_sources.ids() if i != "browser") or "none yet")
+      + "; a wrong id is told the current ones). It only shows a picture; it doesn't change anything.",
+      _object({"source": {"type": "string", "description": "Which source: \"browser\", or a camera id like cam:porch."},
+              "show": {"type": "boolean", "description": "true to show it, false to close it."}},
+             required=("source", "show")))
+async def live_view_tool(args):
+    source = args.get("source")
+    if live_sources.lookup(source) is None:
+        return refuse(f"Not shown: source must be one of {', '.join(live_sources.ids())}.")
+    if source == "browser":   # the browser has its own blade, with the pointer controls
+        return await browser_view_tool.handler({"show": args.get("show")})
+    if not to_bool(args.get("show")):
+        emit(live_sources.close_frame(source))
+        return ok("The live view is closed.")
+    return emit(live_sources.open_frame(source)) or ok(f"{live_sources.SOURCES[source].title} is on the screen, live.")
+
+
+@tool("live_grid",
+      "Show several cameras at once, small, in a grid (show: true, up to four), or take it down (show: false). "
+      "`sources` are fixed camera ids; you never give an address. Use it for \"show me all the cameras\" or a "
+      "comparison; for one camera in full, use live_view. Cameras (when this conversation began): "
+      + (", ".join(i for i in live_sources.ids() if i != "browser") or "none yet") + ".",
+      _object({"sources": {"type": "array", "maxItems": live_sources.MAX_GRID,
+                           "items": {"type": "string"},
+                           "description": "Which cameras, at most four."},
+               "show": {"type": "boolean", "description": "true to show the grid, false to close it."}},
+              required=("show",)))
+async def live_grid_tool(args):
+    if not to_bool(args.get("show")):
+        emit(live_sources.grid_close_frame())
+        return ok("The camera grid is closed.")
+    cameras = live_sources.grid_ids(args.get("sources"))
+    if not cameras:
+        return refuse("Not shown: `sources` needs at least one camera id, at most four. The cameras now: "
+                      + (", ".join(i for i in live_sources.ids() if i != "browser") or "none (is FRIGATE_URL set?)") + ".")
+    return emit(live_sources.grid_frame(cameras)) or ok(f"{len(cameras)} camera(s) are on the screen, live.")
+
+
 UI_TOOLS = [ui_theme, ui_reactor, ui_orbit, ui_chrome, ui_effect, ui_screen, ui_reset]
-SCREEN_TOOLS = [display, blade, browser_view_tool]
+SCREEN_TOOLS = [display, blade, browser_view_tool, live_view_tool, live_grid_tool]
 
 
 def servers() -> dict:

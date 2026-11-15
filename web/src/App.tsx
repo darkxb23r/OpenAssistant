@@ -172,6 +172,7 @@ export default function App() {
     const mine = ++turn.current
     const stale = () => mine !== turn.current
     standbyNext.current = false   // a new request: whatever standby was pending is over
+    store.getState().leaveStandbyLook()   // "wake up", or any request: the reactor is back
 
     clearIdle()
     const s = store.getState()
@@ -341,6 +342,7 @@ export default function App() {
     // Called by voice: back to voice. In text mode a busy page hears only his name, and saying it
     // stops the turn like Space does.
     textMode.current = false
+    store.getState().leaveStandbyLook()   // the wake word ends standby: previous reactor settings back
     if (isBusy(phase)) onSpeechStart()
 
     store.getState().setError(null)
@@ -494,6 +496,7 @@ export default function App() {
     })
     // Standby arrives before "Standing by." is spoken: wait for that to finish.
     watchStandby(() => {
+      store.getState().enterStandbyLook()   // dim ice-blue reactor until he's woken
       if (speaker.current) standbyNext.current = true
       else goDormant()
     })
@@ -759,11 +762,7 @@ export default function App() {
               store.getState().setGestures(false)
               store
                 .getState()
-                .setError(
-                  err?.name === 'NotAllowedError'
-                    ? 'Camera access denied — gesture control is unavailable.'
-                    : `Gesture control failed to start: ${err?.message ?? err}`,
-                )
+                .setError(err?.message ?? `Gesture control failed to start: ${err}`)
             })
         }
         return

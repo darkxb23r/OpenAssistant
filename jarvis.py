@@ -860,7 +860,7 @@ AUTO_APPROVED.extend(n for n in ui_tools.TOOL_NAMES if n not in AUTO_APPROVED)
 
 # Mail and calendar (Phase 3), once ~/.jarvis/secrets.env is filled in. mcp_launch.py reads the
 # secrets itself, so they never appear in this config or on a command line.
-for _server in ("mail", "calendar"):
+for _server in ("mail", "calendar", "frigate"):
     if mcp_launch.configured(_server):
         MCP_SERVERS[_server] = {
             "type": "stdio",

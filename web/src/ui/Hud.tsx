@@ -6,7 +6,7 @@ import { Suggestions } from './Suggestions'
 import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
 import { Pointer } from './Pointer'
-import { GestureGuide } from './GestureGuide'
+import { GestureGuide, GestureStatus } from './GestureGuide'
 
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
@@ -352,6 +352,7 @@ export function Hud() {
         </div>
       )}
       <GestureGuide live={gestures} />
+      <GestureStatus live={gestures} />
     </div>
   )
 }

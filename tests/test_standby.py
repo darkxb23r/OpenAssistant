@@ -63,4 +63,15 @@ async def finish_line(standby: bool) -> bool:
 assert asyncio.run(finish_line(False)) == (True, "May I run a command: x? Yes, no, or always.")
 assert asyncio.run(finish_line(True)) == (False, "May I run a command: x? Say Hey Jarvis, then yes, no, or always.")
 assert "Standby is built in" in j.build_options(True).system_prompt
+
+# The on-screen reactor: dim ice-blue on standby, previous settings back on wake (web/src/store.ts, App.tsx).
+store = (ROOT / "web/src/store.ts").read_text(encoding="utf-8")
+app = (ROOT / "web/src/App.tsx").read_text(encoding="utf-8")
+assert "color: '#4fd8ff', intensity: 0.3" in store and "spin: 0.4" in store
+assert "standbyBackup: { ...s.ui.reactor }" in store and "reactor: { ...s.standbyBackup }" in store
+watch = app.split("watchStandby(() => {", 1)[1].split("})", 1)[0]
+assert "enterStandbyLook()" in watch
+assert app.split("const onWake", 1)[1].split("sfx.play", 1)[0].count("leaveStandbyLook()") == 1
+assert app.split("const respond", 1)[1].split("clearIdle()", 1)[0].count("leaveStandbyLook()") == 1
+assert (ROOT / "web/test/standby.test.ts").exists()
 print("ALL OK")

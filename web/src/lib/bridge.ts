@@ -41,6 +41,7 @@ type Frame = {
   token?: string
   media_ticket?: string
   decision?: string
+  on?: boolean
   question?: Question
   state?: { questions?: Question[]; assistant?: unknown }
 }
@@ -108,6 +109,13 @@ export function watchIdentity(fn: (raw: unknown) => void) {
 let onBladeClose: ((id: string) => void) | null = null
 export function watchBladeClose(fn: (id: string) => void) {
   onBladeClose = fn
+}
+
+/** The server's answer to the browser-control toggle (web.py): on, or off because it was refused
+ *  (an untrusted screen, no browser blade open) or taken away. */
+let onBrowserControl: ((on: boolean) => void) | null = null
+export function watchBrowserControl(fn: ((on: boolean) => void) | null) {
+  onBrowserControl = fn
 }
 
 /** Speech nobody asked for: task news, the result of background work, a
@@ -247,6 +255,10 @@ export const requestSettings = () => sendFrame({ type: 'settings_get' })
 /** null or '' clears a setting. */
 export const saveSettings = (values: Record<string, string | null>) => sendFrame({ type: 'settings_set', values })
 export const restartCore = () => sendFrame({ type: 'settings_restart' })
+/** Ask to take control of Jarvis's browser (the toggle); the server answers with browser_control. */
+export const sendBrowserControl = (on: boolean) => sendFrame({ type: 'browser_control', on })
+/** A pointer / key / text event for the browser (browser_input.py's shapes); ignored unless control is on. */
+export const sendBrowserInput = (event: Record<string, unknown>) => sendFrame({ type: 'browser_input', event })
 
 export function answer(q: string, decision: 'yes' | 'no' | 'always'): void {
   if (!questions.has(q) || socket?.readyState !== WebSocket.OPEN) return
@@ -410,6 +422,8 @@ function dispatch(ws: WebSocket, welcomed: () => void) {
       onPanel?.(msg.panel)
     } else if (msg.type === 'blade' && msg.blade) {
       onBlade?.(msg.blade)
+    } else if (msg.type === 'browser_control') {
+      onBrowserControl?.(msg.on === true)
     } else if (msg.type === 'blade_close' && msg.id) {
       onBladeClose?.(msg.id)
     } else if (msg.type === 'capture' && msg.id) {

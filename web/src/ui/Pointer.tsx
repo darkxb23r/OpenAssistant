@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { BONES, INDEX_TIP, THUMB_TIP, TIPS, WRIST, diag, hands } from '../lib/hands'
+import { BONES, INDEX_TIP, THUMB_TIP, TIPS, WRIST, diag, dwellView, hands } from '../lib/hands'
 
 /**
  * Your hands, drawn on the glass.
@@ -174,6 +174,28 @@ export function Pointer() {
           ctx.beginPath()
           ctx.arc(cx, cy, ring, 0, Math.PI * 2)
           ctx.fill()
+        }
+
+        // Dwell progress: an arc that fills clockwise around the pointer until it clicks.
+        const dwell = dwellView.get(hand.id) ?? 0
+        if (dwell > 0 && !hand.pinched) {
+          const rr = ring + 7 * scale
+          // Dark backing track so the white ring reads on any HUD colour.
+          ctx.shadowBlur = 0
+          ctx.globalAlpha = 0.45
+          ctx.strokeStyle = '#000000'
+          ctx.lineWidth = 6 * scale
+          ctx.beginPath()
+          ctx.arc(cx, cy, rr, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.globalAlpha = 1
+          ctx.strokeStyle = '#ffffff'
+          ctx.shadowColor = '#ffffff'
+          ctx.shadowBlur = 8 * scale
+          ctx.lineWidth = 4 * scale
+          ctx.beginPath()
+          ctx.arc(cx, cy, rr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * dwell)
+          ctx.stroke()
         }
 
         ctx.globalAlpha = 1

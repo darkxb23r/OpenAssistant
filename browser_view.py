@@ -8,7 +8,10 @@ is the one shown, which is the one Playwright is working in. web.py serves the f
 /browser/live as an MJPEG stream (multipart/x-mixed-replace), which an <img> plays natively; the
 face shows it in a blade ("show the browser"). Nobody watching: no screencast, nothing to encode.
 
-The view is read-only: nothing from the interface is sent to the browser.
+The view is read-only unless the user takes control: input_event() (browser_input.py's events, which
+web.py lets through only from a trusted screen with the blade open and the toggle on) goes to the
+tab that was last shown, through the same DevTools socket. Without that, nothing from the interface
+is sent to the browser.
 """
 import asyncio
 import base64
@@ -58,6 +61,9 @@ class LiveView:
         self._new = asyncio.Condition()
         self._viewers = 0
         self._task: asyncio.Task | None = None
+        self.size: tuple[float, float] | None = None   # the shown tab's viewport, in CSS pixels
+        self._send = None                               # sends a DevTools command while one is connected
+        self._session: str | None = None                # the tab that was shown last
 
     async def frames(self):
         """JPEG frames for one viewer, at most FPS a second, until it goes away."""
@@ -80,6 +86,23 @@ class LiveView:
             self._viewers -= 1
             if not self._viewers and self._task:
                 self._task.cancel()
+
+    @property
+    def watched(self) -> bool:
+        return self._viewers > 0
+
+    async def input_event(self, calls: list) -> bool:
+        """Send translated input [(method, params)] to the tab on show. False if there's none now."""
+        send, session = self._send, self._session
+        if not (send and session and calls):
+            return False
+        try:
+            for method, params in calls:
+                await send(method, params, session=session)
+        except Exception as e:   # the socket went away under us: the screencast reconnects by itself
+            log.info("browser input: %r", e)
+            return False
+        return True
 
     async def _show(self, jpeg: bytes) -> None:
         async with self._new:
@@ -120,16 +143,28 @@ class LiveView:
                 await ws.send(json.dumps(msg))
 
             await send("Target.setDiscoverTargets", {"discover": True})
-            async for raw in ws:
-                msg = json.loads(raw)
-                method, params = msg.get("method"), msg.get("params") or {}
-                if method == "Target.targetCreated" and params.get("targetInfo", {}).get("type") == "page":
-                    await send("Target.attachToTarget", {"targetId": params["targetInfo"]["targetId"], "flatten": True})
-                elif method == "Target.attachedToTarget" and params.get("targetInfo", {}).get("type") == "page":
-                    await send("Page.startScreencast", {"format": "jpeg", "quality": 60, "maxWidth": 1280,
-                                                        "maxHeight": 800, "everyNthFrame": 1},
-                               session=params["sessionId"])
-                elif method == "Page.screencastFrame":
-                    await send("Page.screencastFrameAck", {"sessionId": params["sessionId"]},
-                               session=msg.get("sessionId"))
-                    await self._show(base64.b64decode(params["data"]))
+            self._send = send
+            try:
+                await self._pump(ws, send)
+            finally:
+                self._send, self._session, self.size = None, None, None
+
+    async def _pump(self, ws, send) -> None:
+        async for raw in ws:
+            msg = json.loads(raw)
+            method, params = msg.get("method"), msg.get("params") or {}
+            if method == "Target.targetCreated" and params.get("targetInfo", {}).get("type") == "page":
+                await send("Target.attachToTarget", {"targetId": params["targetInfo"]["targetId"], "flatten": True})
+            elif method == "Target.attachedToTarget" and params.get("targetInfo", {}).get("type") == "page":
+                await send("Page.startScreencast", {"format": "jpeg", "quality": 60, "maxWidth": 1280,
+                                                    "maxHeight": 800, "everyNthFrame": 1},
+                           session=params["sessionId"])
+            elif method == "Page.screencastFrame":
+                await send("Page.screencastFrameAck", {"sessionId": params["sessionId"]},
+                           session=msg.get("sessionId"))
+                self._session = msg.get("sessionId")
+                meta = params.get("metadata") or {}
+                w, h = meta.get("deviceWidth"), meta.get("deviceHeight")
+                if all(isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0 for n in (w, h)):
+                    self.size = (float(w), float(h))
+                await self._show(base64.b64decode(params["data"]))

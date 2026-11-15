@@ -25,14 +25,21 @@ The page loads pictures and video through Jarvis, never directly:
 - /img and /media fetch remote images and video, through netguard.py's checks, and only hand
   back what really is an image (or video/audio), capped in size;
 - /browser/live is Jarvis's own browser as an MJPEG stream (browser_view.py), with a ticket like
-  /file; it only shows, nothing goes back to the browser.
+  /file; it only shows, nothing goes back to the browser;
+- /live/{source} relays a source from live_sources.py's fixed registry (the Frigate cameras on the
+  LAN, and the same browser): the page names an id, never an address, and it needs a ticket too;
+  /live/{source}/mse is the same camera as H.264 over a WebSocket (go2rtc's MSE), for a MediaSource.
 
 The protocol is the one web/src/lib/bridge.ts speaks, after the hello and welcome (protocol.py):
   browser -> Jarvis: {"type": "ask", "text", "id"}, {"type": "interrupt"},
                      {"type": "answer", "q", "decision"} (a question's button), {"type": "presence"},
                      {"type": "ticket"} (a new media ticket, before the 12 h one runs out),
                      {"type": "settings_get"}, {"type": "settings_set", "values"},
-                     {"type": "settings_restart"} (the Settings panel, settings.py)
+                     {"type": "settings_restart"} (the Settings panel, settings.py),
+                     {"type": "browser_control", "on"} (the "YOU HAVE CONTROL" toggle, off when the
+                     browser blade opens) and {"type": "browser_input", "event"} (browser_input.py: only
+                     from a face trusted as "physical" or "device", with the blade open and the toggle on;
+                     otherwise ignored)
   Jarvis -> browser: {"type": "ready", "servers"}, {"type": "text", "delta", "ask"},
                      {"type": "tool", "name", "ask"}, {"type": "done", "ask"},
                      {"type": "say", "text"} (speech between turns), {"type": "standby"},
@@ -42,7 +49,8 @@ The protocol is the one web/src/lib/bridge.ts speaks, after the hello and welcom
                      live view),
                      {"type": "ticket", "media_ticket"?} (the answer to a ticket frame; none in
                      open mode or without a device),
-                     {"type": "settings", "fields" | "error"}, {"type": "settings_saved", "saved" | "errors"}.
+                     {"type": "settings", "fields" | "error"}, {"type": "settings_saved", "saved" | "errors"},
+                     {"type": "browser_control", "on": false} (control refused or taken away).
 """
 import asyncio
 import contextlib
@@ -68,10 +76,12 @@ from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+import browser_input
 import browser_view
 import guardrails
 import hmac
 import identity
+import live_sources
 import netguard
 import protocol
 import settings
@@ -263,6 +273,8 @@ class WebServer:
         self.control = None           # control.Control, set by jarvis.main: what jarvisctl talks to
         self.told_elsewhere: set = set()   # questions a satellite has said once it can't answer
         self.live = browser_view.LiveView()   # Jarvis's browser, screencast to /browser/live
+        self.slots = live_sources.Slots()     # open /live streams, per client
+        self._cameras: asyncio.Task | None = None   # live_sources.keep_fresh: Frigate's camera list
         self._server = None
         self.app = Guard(Starlette(routes=[
             Route("/health", self.health),
@@ -271,6 +283,9 @@ class WebServer:
             Route("/img", self.img),
             Route("/media", self.media),
             Route("/browser/live", self.browser_live),
+            Route("/live/{source}", self.live_source),
+            WebSocketRoute("/live/{source}/mse", self.live_mse),
+            Route("/live/{rest:path}", self.live_unknown),   # anything with a slash in it: no redirect, a 404
             Route("/stt", self.stt, methods=["POST"]),
             Route("/tts", self.tts, methods=["POST"]),
             WebSocketRoute("/", self.socket),
@@ -291,6 +306,7 @@ class WebServer:
         self._server = _QuietServer(uvicorn.Config(self.app, host=HOST, port=self.port, log_level="warning",
                                                    lifespan="off"))
         asyncio.create_task(self._server.serve())
+        self._cameras = asyncio.create_task(live_sources.keep_fresh())
         for _ in range(100):
             if self._server.started:
                 break
@@ -321,6 +337,8 @@ class WebServer:
                 await client.ws.close(code=1012)
         if self._server:
             self._server.should_exit = True
+        if self._cameras:
+            self._cameras.cancel()
         self.running = False
 
     def send(self, frame: dict) -> bool:
@@ -420,6 +438,77 @@ class WebServer:
 
         return cors(request, StreamingResponse(parts(), media_type="multipart/x-mixed-replace; boundary=frame",
                                                headers=SANDBOX | {"cache-control": "no-store"}))
+
+    async def live_source(self, request: Request) -> Response:
+        """A source from the registry (live_sources.py) as a multipart stream. Only an id in the
+        registry is served; what it stands for is decided there, never by the request."""
+        if not self._ticket_ok(request):
+            return cors(request, PlainTextResponse("a media ticket is needed", status_code=403))
+        src = live_sources.lookup(request.path_params.get("source"))
+        if src is None:
+            return cors(request, PlainTextResponse("no such source", status_code=404))
+        who = request.query_params.get("mt") or (request.client.host if request.client else "?")
+        if not self.slots.take(who):
+            return cors(request, PlainTextResponse("too many live streams open", status_code=429))
+        headers = SANDBOX | {"cache-control": "no-store"}
+        if src.kind == "browser":
+            if not browser_view.running():
+                self.slots.give(who)
+                return cors(request, PlainTextResponse("the browser isn't running", status_code=503))
+            return cors(request, StreamingResponse(self._browser_parts(who), headers=headers,
+                                                   media_type="multipart/x-mixed-replace; boundary=frame"))
+        try:
+            # ?grid=1 is the one thing the query can ask for: a small, slow picture for a grid tile.
+            small = request.query_params.get("grid") == "1"
+            up = await live_sources.open_upstream(src, *((live_sources.GRID_FPS, live_sources.GRID_HEIGHT) if small else ()))
+        except live_sources.Refused as e:
+            self.slots.give(who)
+            return cors(request, PlainTextResponse(str(e), status_code=e.status))
+        except BaseException:
+            self.slots.give(who)
+            raise
+
+        async def body():
+            try:
+                async for chunk in up.chunks(asyncio.get_running_loop()):
+                    yield chunk
+            finally:
+                self.slots.give(who)
+                await up.close()   # the client went, or the caps cut it: the camera's side closes too
+
+        return cors(request, StreamingResponse(body(), headers=headers, media_type=up.content_type))
+
+    async def live_mse(self, ws: WebSocket) -> None:
+        """A source's go2rtc stream (H.264 for MediaSource), relayed: live_sources.relay_mse. Same ticket
+        as the picture; a refusal before the handshake is a 403 to the page, which then uses MJPEG."""
+        src = live_sources.lookup(ws.path_params.get("source"))
+        if not self._ticket_ok(ws) or src is None or not src.mse:
+            await ws.close(code=4403)
+            return
+        who = ws.query_params.get("mt") or (ws.client.host if ws.client else "?")
+        if not self.slots.take(who):
+            await ws.close(code=4429)
+            return
+        try:
+            await live_sources.relay_mse(ws, src)
+        finally:
+            self.slots.give(who)
+
+    async def live_unknown(self, request: Request) -> Response:
+        return cors(request, PlainTextResponse("no such source", status_code=404))
+
+    async def _browser_parts(self, who: str):
+        loop, started = asyncio.get_running_loop(), asyncio.get_running_loop().time()
+        frames = self.live.frames()
+        try:
+            async for jpeg in frames:
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpeg)).encode()
+                       + b"\r\n\r\n" + jpeg + b"\r\n")
+                if loop.time() - started > live_sources.MAX_SECONDS:
+                    return
+        finally:
+            await frames.aclose()
+            self.slots.give(who)
 
     async def img(self, request: Request) -> Response:
         if not self._ticket_ok(request):
@@ -560,6 +649,10 @@ class WebServer:
                     self.hub.present(client)
                 elif kind in ("settings_get", "settings_set", "settings_restart"):
                     await self._settings(client, kind, msg)
+                elif kind == "browser_control":
+                    await self._browser_control(client, msg.get("on") is True)
+                elif kind == "browser_input":
+                    await self._browser_input(client, msg.get("event"))
                 elif kind == "ticket":   # renewing the media ticket without a new hello
                     client.ticket = self._new_ticket(client)
                     await client.write({"type": "ticket", **({"media_ticket": client.ticket} if client.ticket else {})})
@@ -570,6 +663,31 @@ class WebServer:
             if client in self.clients:
                 self.clients.remove(client)
             log.info("%s disconnected (%d open)", client.kind, len(self.clients))
+
+    def browser_blade_open(self) -> bool:
+        return any(b.get("id") == browser_view.BLADE_ID for b in self.hub.scene.blades)
+
+    async def _browser_control(self, client, on: bool) -> None:
+        """The toggle: on only for a trusted screen while the browser blade is open; anything else
+        leaves it off, and the page is told so."""
+        on = on and browser_input.may_control(client) and self.browser_blade_open()
+        client.browser_control = on
+        await client.write({"type": "browser_control", "on": on})
+
+    async def _browser_input(self, client, event) -> None:
+        """A pointer or key event for Jarvis's browser (browser_input.py). Ignored, silently, unless
+        everything lines up: a trusted screen, the blade open, the browser watched, the toggle on."""
+        if not (client.browser_control and browser_input.may_control(client) and self.browser_blade_open()
+                and self.live.watched):
+            if client.browser_control and not self.browser_blade_open():
+                client.browser_control = False   # the blade went away: the toggle goes with it
+                await client.write({"type": "browser_control", "on": False})
+            return
+        if not client.input_limit.take():
+            return
+        calls = browser_input.translate(event, self.live.size)
+        if calls:
+            await self.live.input_event(calls)
 
     async def _settings(self, client, kind: str, msg: dict) -> None:
         """The Settings panel (settings.py): only from a face the user is at, like a hard question's
@@ -622,6 +740,8 @@ class WebClient:
         self._received = None   # handed to Jarvis; no turn started for it yet
         self._turn = None       # the question whose turn is running
         self._abandoned = None  # the turn a barge-in stopped: its last words are not spoken
+        self.browser_control = False   # the "YOU HAVE CONTROL" toggle: off until the user switches it on
+        self.input_limit = browser_input.Limiter()
 
     def configure(self, hello: dict, trust: str, device: dict | None) -> None:
         """What the hello said this client is: a face (a screen), a terminal, a satellite."""

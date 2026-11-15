@@ -96,7 +96,7 @@ r = asyncio.run(u.ui_reset.handler({}))
 assert error(r) and "No screen is connected" in r["content"][0]["text"]
 
 # Every tool is listed for auto-approval, under the names the SDK gives them.
-assert len(u.TOOL_NAMES) == 10 and "mcp__jarvis_ui__ui_theme" in u.TOOL_NAMES and "mcp__jarvis__display" in u.TOOL_NAMES
+assert len(u.TOOL_NAMES) == 12 and "mcp__jarvis_ui__ui_theme" in u.TOOL_NAMES and "mcp__jarvis__display" in u.TOOL_NAMES
 assert "mcp__jarvis__browser_view" in u.TOOL_NAMES
 assert set(u.servers()) == {"jarvis_ui", "jarvis"}
 # Jarvis always has them, auto-approved (the interface can be opened at any time); task workers

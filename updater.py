@@ -188,9 +188,9 @@ def apply(name: str) -> str:
         raise ValueError(f"The tests in the {name} copy took over {TEST_TIMEOUT_S // 60} minutes; nothing changed.")
     if done.returncode:
         tail = "\n".join((done.stdout + done.stderr).strip().splitlines()[-25:])
-        guardrails.show(f"tests failed for {name}", tail)
         log.warning("tests failed for %s:\n%s", name, tail)
-        raise ValueError(f"The tests failed in the {name} copy, so nothing changed. The failures are on screen.")
+        raise Shown(f"The tests failed in the {name} copy, so nothing changed. The failures are on screen.",
+                    f"tests failed for {name}", tail)
     ROLLBACK_FILE.write_text(json.dumps({"commit": state["base"], "update": name}), encoding="utf-8")
     git("merge", "-q", "--ff-only", f"update/{name}")
     git("worktree", "remove", "--force", str(_copy(name)))
@@ -230,11 +230,24 @@ def startup_note() -> str | None:
 
 
 # --- tools ---------------------------------------------------------------------------------------
+class Shown(ValueError):
+    """A refusal with something to read in full (the failing tests). Steps run in a thread, and the
+    screen can only be drawn on from the event loop, so _run shows it there: showing it from the
+    thread failed with "no running event loop", which hid why an update was refused."""
+
+    def __init__(self, message: str, title: str, text: str):
+        super().__init__(message)
+        self.title, self.text = title, text
+
+
 async def _run(fn, *args) -> dict:
     """Run a step (blocking ones in a thread, since tests and git can take a while)."""
     try:
         result = await fn(*args) if asyncio.iscoroutinefunction(fn) else await asyncio.to_thread(fn, *args)
         return _text(result if isinstance(result, str) else json.dumps(result))
+    except Shown as e:
+        guardrails.show(e.title, e.text)
+        return _text(str(e), error=True)
     except (ValueError, RuntimeError) as e:
         return _text(str(e), error=True)
 

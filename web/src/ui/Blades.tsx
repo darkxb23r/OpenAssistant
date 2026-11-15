@@ -6,6 +6,7 @@ import { sanitisePanelHtml } from './sanitise'
 import { frameSpan, peaceScroll, pinchCount } from '../lib/hands'
 import * as camera from '../lib/camera'
 import { answer } from '../lib/brain'
+import { sendBrowserControl, sendBrowserInput, watchBrowserControl } from '../lib/bridge'
 
 /**
  * The blades.
@@ -151,6 +152,230 @@ const CameraView = memo(function CameraView() {
 const BrowserView = memo(function BrowserView() {
   const [attempt, setAttempt] = useState(0)
   const [down, setDown] = useState(false)
+  // Control is the user's, and always starts off: it is only on once the server has said so, and it is
+  // never kept from one opening of the blade to the next. While it is on, the blade says so.
+  const [control, setControl] = useState(false)
+  const img = useRef<HTMLImageElement>(null)
+  const lastMove = useRef(0)
+  useEffect(() => {
+    watchBrowserControl(setControl)
+    return () => {
+      watchBrowserControl(null)
+      sendBrowserControl(false)
+    }
+  }, [])
+  /** Where on the picture (0..1 each way, past the letterbox bars) an event landed; the server scales it. */
+  const where = (e: { clientX: number; clientY: number }) => {
+    const el = img.current
+    if (!el || !el.naturalWidth || !el.naturalHeight) return null
+    const r = el.getBoundingClientRect()
+    const s = Math.min(r.width / el.naturalWidth, r.height / el.naturalHeight)
+    const w = el.naturalWidth * s
+    const h = el.naturalHeight * s
+    const x = (e.clientX - (r.left + (r.width - w) / 2)) / w
+    const y = (e.clientY - (r.top + (r.height - h) / 2)) / h
+    return x < 0 || x > 1 || y < 0 || y > 1 ? null : { x, y }
+  }
+  const mods = (e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) =>
+    (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0)
+  const button = (b: number) => (b === 1 ? 'middle' : b === 2 ? 'right' : 'left')
+  const mouse = (a: string, e: React.PointerEvent | React.WheelEvent, extra: Record<string, unknown> = {}) => {
+    const at = where(e)
+    if (at) sendBrowserInput({ t: 'mouse', a, ...at, m: mods(e), ...extra })
+  }
+  useEffect(() => {
+    if (!down) return
+    const t = setTimeout(() => {
+      setDown(false)
+      setAttempt((n) => n + 1)
+    }, 3000)
+    return () => clearTimeout(t)
+  }, [down])
+  const grab = control
+    ? {
+        tabIndex: 0,
+        // Nothing here reaches the card's own drag and zoom, or the page's key shortcuts.
+        onPointerDown: (e: React.PointerEvent) => {
+          e.stopPropagation()
+          ;(e.currentTarget as HTMLElement).focus()
+          mouse('down', e, { b: button(e.button), c: Math.min(3, Math.max(1, e.detail)) })
+        },
+        onPointerUp: (e: React.PointerEvent) => {
+          e.stopPropagation()
+          mouse('up', e, { b: button(e.button), c: Math.min(3, Math.max(1, e.detail)) })
+        },
+        onPointerMove: (e: React.PointerEvent) => {
+          e.stopPropagation()
+          const now = performance.now()
+          if (now - lastMove.current < 33) return
+          lastMove.current = now
+          mouse('move', e)
+        },
+        onWheel: (e: React.WheelEvent) => {
+          e.stopPropagation()
+          mouse('wheel', e, { dx: e.deltaX, dy: e.deltaY })
+        },
+        onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+        onKeyDown: (e: React.KeyboardEvent) => {
+          e.stopPropagation()
+          e.preventDefault()
+          sendBrowserInput({ t: 'key', a: 'down', key: e.key, code: e.code, m: mods(e) })
+        },
+        onKeyUp: (e: React.KeyboardEvent) => {
+          e.stopPropagation()
+          e.preventDefault()
+          sendBrowserInput({ t: 'key', a: 'up', key: e.key, code: e.code, m: mods(e) })
+        },
+        onPaste: (e: React.ClipboardEvent) => {
+          e.stopPropagation()
+          e.preventDefault()
+          const text = e.clipboardData.getData('text/plain').slice(0, 500)
+          if (text) sendBrowserInput({ t: 'text', text })
+        },
+      }
+    : {}
+  return (
+    <>
+      <div className="bl-controlbar" onPointerDown={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          className={`bl-control${control ? ' bl-control-on' : ''}`}
+          aria-pressed={control}
+          onClick={() => sendBrowserControl(!control)}
+        >
+          {control ? 'RELEASE CONTROL' : 'TAKE CONTROL'}
+        </button>
+        {control && <span className="bl-control-badge">YOU HAVE CONTROL</span>}
+      </div>
+      <div className={`bl-grab${control ? ' bl-grab-on' : ''}`} {...grab}>
+        <img
+          ref={img}
+          key={attempt}
+          className="bl-image bl-browser"
+          src={withTicket(`${BRIDGE_HTTP_URL}/browser/live?n=${attempt}`)}
+          alt="Jarvis's browser, live"
+          draggable={false}
+          onError={() => setDown(true)}
+        />
+      </div>
+      {down && <p className="bl-note">The browser isn't sending a picture yet…</p>}
+    </>
+  )
+})
+
+/**
+ * A live source from the server's fixed list (/live/{id}: Frigate's cameras, relayed as MJPEG). The
+ * blade carries an id only; the page builds nothing but this one path, so a frame can't point it at
+ * another address. Like BrowserView, if the stream drops (a camera restarted, the server's time cap,
+ * a renewed ticket) it tries again every few seconds.
+ */
+const SOURCE_ID = /^[a-z0-9:_-]{1,40}$/
+
+const MSE_CODECS = ['avc1.640029', 'avc1.64002A', 'avc1.640033', 'mp4a.40.2', 'mp4a.40.5', 'flac', 'opus']
+const mseSupported = () => typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported('video/mp4; codecs="avc1.640029"')
+/** Sources whose H.264 stream failed this session (no go2rtc stream, an old browser): MJPEG from then on. */
+const mseFailed = new Set<string>()
+
+/**
+ * H.264 from go2rtc, relayed by the server (/live/{id}/mse), played through MediaSource: a fraction of
+ * MJPEG's bandwidth. The server says which codec it found; the page appends what follows and keeps to the
+ * live edge. Anything wrong (refused, an error from go2rtc, no data for a while, a full queue) calls
+ * onFail, and the caller shows the MJPEG picture instead.
+ */
+const MseVideo = memo(function MseVideo({ source, onFail }: { source: string; onFail: () => void }) {
+  const video = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    const el = video.current
+    if (!el) return
+    const mediaSource = new MediaSource()
+    const url = URL.createObjectURL(mediaSource)
+    el.src = url
+    let ws: WebSocket | null = null
+    let buffer: SourceBuffer | null = null
+    let queue: ArrayBuffer[] = []
+    let gone = false
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+    const fail = () => {
+      if (gone) return
+      mseFailed.add(source)
+      onFail()
+    }
+    const feed = () => {
+      if (!buffer || buffer.updating || !queue.length) return
+      try {
+        buffer.appendBuffer(queue.shift()!)
+      } catch {
+        fail()
+      }
+    }
+    const kick = () => {
+      clearTimeout(watchdog)
+      watchdog = setTimeout(fail, 8000)
+    }
+    const open = () => {
+      const codecs = MSE_CODECS.filter((c) => MediaSource.isTypeSupported(`video/mp4; codecs="${c}"`)).join(',')
+      ws = new WebSocket(withTicket(`${BRIDGE_HTTP_URL.replace(/^http/, 'ws')}/live/${encodeURIComponent(source)}/mse?n=0`))
+      ws.binaryType = 'arraybuffer'
+      ws.onopen = () => {
+        ws?.send(JSON.stringify({ type: 'mse', value: codecs }))
+        kick()
+      }
+      ws.onerror = fail
+      ws.onclose = () => {
+        if (!gone && !buffer) fail()
+      }
+      ws.onmessage = (e) => {
+        kick()
+        if (typeof e.data === 'string') {
+          let note: { type?: string; value?: string } = {}
+          try {
+            note = JSON.parse(e.data)
+          } catch {
+            return fail()
+          }
+          if (note.type !== 'mse' || typeof note.value !== 'string' || buffer) return fail()
+          try {
+            buffer = mediaSource.addSourceBuffer(note.value)
+          } catch {
+            return fail()
+          }
+          buffer.mode = 'segments'
+          buffer.onupdateend = () => {
+            // Stay at the live edge: drop what's long played, and catch up if playback has fallen behind.
+            if (buffer && !buffer.updating && el.buffered.length) {
+              const end = el.buffered.end(el.buffered.length - 1)
+              if (end - el.buffered.start(0) > 15) buffer.remove(0, end - 8)
+              else if (end - el.currentTime > 3) el.currentTime = end - 0.5
+            }
+            feed()
+          }
+          return
+        }
+        if (!buffer) return fail()
+        if (queue.length > 100) return fail()
+        queue.push(e.data as ArrayBuffer)
+        feed()
+        if (el.paused) void el.play().catch(() => {})
+      }
+    }
+    mediaSource.addEventListener('sourceopen', open, { once: true })
+    return () => {
+      gone = true
+      clearTimeout(watchdog)
+      ws?.close()
+      queue = []
+      el.removeAttribute('src')
+      el.load()
+      URL.revokeObjectURL(url)
+    }
+  }, [source, onFail])
+  return <video ref={video} className="bl-video" autoPlay muted playsInline />
+})
+
+/** One camera as the server's MJPEG relay: an <img>, retried every few seconds if it drops. */
+const MjpegView = memo(function MjpegView({ source, small }: { source: string; small?: boolean }) {
+  const [attempt, setAttempt] = useState(0)
+  const [down, setDown] = useState(false)
   useEffect(() => {
     if (!down) return
     const t = setTimeout(() => {
@@ -164,18 +389,43 @@ const BrowserView = memo(function BrowserView() {
       <img
         key={attempt}
         className="bl-image bl-browser"
-        src={withTicket(`${BRIDGE_HTTP_URL}/browser/live?n=${attempt}`)}
-        alt="Jarvis's browser, live"
+        // ?grid=1 asks the server for its small, slow picture; nothing else of the URL is ours to vary.
+        src={withTicket(`${BRIDGE_HTTP_URL}/live/${encodeURIComponent(source)}?n=${attempt}${small ? '&grid=1' : ''}`)}
+        alt={`Live: ${source}`}
         onError={() => setDown(true)}
       />
-      {down && <p className="bl-note">The browser isn't sending a picture yet…</p>}
+      {down && <p className="bl-note">No picture from that camera yet…</p>}
     </>
   )
+})
+
+const LiveView = memo(function LiveView({ source, sources }: { source?: string; sources?: string[] }) {
+  const [, redraw] = useState(0)
+  const onFail = useCallback(() => redraw((n) => n + 1), [])
+  if (sources) {
+    // A grid: up to four, each small and slow (the server caps them again), MJPEG only.
+    const tiles = sources.filter((s) => SOURCE_ID.test(s)).slice(0, 4)
+    if (!tiles.length) return <p className="bl-note">Nothing to show.</p>
+    return (
+      <div className="bl-livegrid">
+        {tiles.map((s) => (
+          <div key={s} className="bl-livetile">
+            <MjpegView source={s} small />
+            <span className="bl-livelabel">{s.replace(/^cam:/, '').toUpperCase()}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  if (!source || !SOURCE_ID.test(source)) return <p className="bl-note">Nothing to show.</p>
+  if (source.startsWith('cam:') && mseSupported() && !mseFailed.has(source)) return <MseVideo source={source} onFail={onFail} />
+  return <MjpegView source={source} />
 })
 
 const Body = memo(function Body({ blade }: { blade: Blade }) {
   if (blade.kind === 'camera') return <CameraView />
   if (blade.kind === 'browser') return <BrowserView />
+  if (blade.kind === 'live') return <LiveView source={blade.source} sources={blade.sources} />
 
   if (blade.kind === 'embed' && blade.url) {
     const embed = embedUrl(blade.url)
@@ -241,7 +491,14 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
     return (
       <>
         {body}
-        <div className="bl-answers" onPointerDown={(e) => e.stopPropagation()}>
+        <div
+          className="bl-answers"
+          data-guarded=""
+          ref={(n) => {
+            // Stamped once, when the prompt first appears: hand dwell-click refuses it for the first second.
+            if (n && !n.dataset.guardedSince) n.dataset.guardedSince = String(performance.now())
+          }}
+          onPointerDown={(e) => e.stopPropagation()}>
           {(['yes', 'no', 'always'] as const).map((d) => (
             <button key={d} type="button" className={`bl-answer bl-answer-${d}`} onClick={() => answer(q, d)}>
               {d}

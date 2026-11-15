@@ -40,7 +40,11 @@ export type Panel = {
 export type Blade = {
   id: string
   title: string
-  kind: 'image' | 'gallery' | 'video' | 'embed' | 'markup' | 'camera' | 'browser'
+  kind: 'image' | 'gallery' | 'video' | 'embed' | 'markup' | 'camera' | 'browser' | 'live'
+  /** live: an id from the server's fixed list of sources (live_sources.py), never an address. */
+  source?: string
+  /** live grid: up to four of those ids, shown small side by side. */
+  sources?: string[]
   /** image / video / embed. */
   url?: string
   /** gallery. */
@@ -152,6 +156,9 @@ export const UI_DEFAULTS: UiState = {
   effect: null,
 }
 
+/** The dim ice-blue look the reactor takes on while Jarvis is on standby. */
+export const STANDBY_REACTOR = { color: '#4fd8ff', intensity: 0.3, spin: 0.4 } as const
+
 /**
  * A deep-partial of UiState, minus the two fields that are not patchable:
  * orbits are addressed one at a time by id, and an effect is fired rather than
@@ -249,6 +256,8 @@ type State = {
   expandedBlade: string | null
   /** JARVIS's control over his own appearance. UI_DEFAULTS == the stock look. */
   ui: UiState
+  /** Reactor settings from before the standby look, or null when not on standby. */
+  standbyBackup: UiState['reactor'] | null
 
   setVoice: (v: string) => void
   setGestures: (on: boolean) => void
@@ -280,6 +289,10 @@ type State = {
   clearOrbits: () => void
   fireEffect: (kind: UiEffect['kind']) => void
   resetUi: () => void
+  /** Standby: dim the reactor, remembering its settings. Idempotent. */
+  enterStandbyLook: () => void
+  /** Standby over: put back the reactor settings enterStandbyLook saved. */
+  leaveStandbyLook: () => void
   clearScreen: (what: 'all' | 'panels' | 'transcript') => void
 }
 
@@ -304,6 +317,7 @@ export const useStore = create<State>((set) => ({
   expandedBlade: null,
   bootNote: '',
   ui: defaultUi(),
+  standbyBackup: null,
 
   setVoice: (voice) => set({ voice }),
   setGestures: (gestures) => set({ gestures }),
@@ -416,7 +430,22 @@ export const useStore = create<State>((set) => ({
   clearOrbits: () => set((s) => ({ ui: { ...s.ui, orbits: [] } })),
   fireEffect: (kind) =>
     set((s) => ({ ui: { ...s.ui, effect: { kind, at: Date.now() } } })),
-  resetUi: () => set({ ui: defaultUi() }),
+  resetUi: () => set({ ui: defaultUi(), standbyBackup: null }),
+  // The saved look is only the reactor's own settings. Entering twice must not save the dim look
+  // as the "previous" one, or waking would restore the dim look.
+  enterStandbyLook: () =>
+    set((s) =>
+      s.standbyBackup
+        ? {}
+        : {
+            standbyBackup: { ...s.ui.reactor },
+            ui: { ...s.ui, reactor: { ...s.ui.reactor, ...STANDBY_REACTOR } },
+          },
+    ),
+  leaveStandbyLook: () =>
+    set((s) =>
+      s.standbyBackup ? { standbyBackup: null, ui: { ...s.ui, reactor: { ...s.standbyBackup } } } : {},
+    ),
   // An explicit order outranks the sticky flag. `hold: 'sticky'` only ever
   // meant "survive the next turn boundary"; when someone says "clear the
   // screen", a card staying up because an earlier turn asked nicely reads as

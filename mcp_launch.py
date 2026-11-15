@@ -7,10 +7,11 @@ The secrets never go into Jarvis's MCP config: the SDK passes that on a command 
 local process can list, Jarvis's own shell commands included. This launcher reads them itself,
 hands each server only the keys it needs, and passes stdin/stdout straight through.
 
-Usage (from jarvis.py's MCP_SERVERS): python mcp_launch.py mail|calendar
+Usage (from jarvis.py's MCP_SERVERS): python mcp_launch.py mail|calendar|frigate
 """
 import os
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 
@@ -18,6 +19,7 @@ JARVIS_HOME = Path.home() / ".jarvis"
 SECRETS_FILE = JARVIS_HOME / "secrets.env"
 MCP_DIR = JARVIS_HOME / "mcp"
 VENV_PYTHON = MCP_DIR / "mailcow" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+FRIGATE_PYTHON = MCP_DIR / "frigate" / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 # For each server: its command, and its environment as {server variable: secrets.env key}.
 SERVERS = {
@@ -36,6 +38,17 @@ SERVERS = {
         "env": {"DAV_URL": "DAV_URL", "DAV_USERNAME": "MAIL_USER", "DAV_PASSWORD": "MAIL_PASSWORD"},
         "fixed": {"DAV_APPROVAL": "client", "LOG_LEVEL": "info"},
     },
+    # Frigate NVR (frigate-mcp, own venv), no secrets. Jarvis only gets the read tools
+    # (guardrails.FRIGATE_AUTO); "requires" skips it when the venv is missing.
+    "frigate": {
+        "command": [str(FRIGATE_PYTHON), "-I", "-m", "frigate_mcp"],
+        # Its address is the user's FRIGATE_URL setting (the Settings panel), which live_sources.py
+        # also relays the cameras from; without it the server isn't started.
+        "env": {"FRIGATE_URL": "FRIGATE_URL"},
+        "fixed": {},
+        "cwd": tempfile.gettempdir(),
+        "requires": str(FRIGATE_PYTHON),
+    },
 }
 # Settings that would quietly switch off certificate checks; never passed on.
 UNSAFE = ("MCP_MAILCOW_TLS_VERIFY", "NODE_TLS_REJECT_UNAUTHORIZED")
@@ -53,6 +66,9 @@ def read_secrets() -> dict[str, str]:
 
 def configured(server: str) -> bool:
     """True when secrets.env has every value this server needs."""
+    requires = SERVERS[server].get("requires")
+    if requires and not Path(requires).exists():
+        return False
     secrets = read_secrets()
     return all(secrets.get(key) for key in SERVERS[server]["env"].values())
 
@@ -62,6 +78,10 @@ def main() -> int:
     if not server:
         print(f"usage: mcp_launch.py {'|'.join(SERVERS)}", file=sys.stderr)
         return 2
+    requires = server.get("requires")
+    if requires and not Path(requires).exists():
+        print(f"mcp_launch: {requires} is not installed", file=sys.stderr)
+        return 1
     secrets = read_secrets()
     missing = [key for key in server["env"].values() if not secrets.get(key)]
     if missing:
@@ -70,7 +90,7 @@ def main() -> int:
     env = {k: v for k, v in os.environ.items() if k not in UNSAFE}
     env |= {var: secrets[key] for var, key in server["env"].items()} | server["fixed"]
     (JARVIS_HOME / "logs").mkdir(exist_ok=True)
-    return subprocess.call(server["command"], env=env)
+    return subprocess.call(server["command"], env=env, cwd=server.get("cwd"))
 
 
 if __name__ == "__main__":

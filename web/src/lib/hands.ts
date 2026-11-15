@@ -1,6 +1,11 @@
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
+import { describeCameraError, preflightFailure, type Failure } from './gestureHealth'
 import { OneEuroPoint } from './oneEuro'
 import { holdCamera, releaseCamera } from './camera'
+import {
+  clampDwellMs, dwellTarget, guardOf, isTypingIn, loadDwellSettings, newDwell, saveDwellSettings, stepDwell,
+  type DwellSettings, type DwellState,
+} from './dwell'
 
 /**
  * Hands.
@@ -47,6 +52,9 @@ const WASM_BASE = '/mediapipe'
  */
 const MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
+/** Fetched into public/mediapipe by scripts/vendor-wasm.mjs at build time; tried first, so
+ *  tracking works offline. MODEL_URL above is the fallback. */
+const MODEL_LOCAL = '/mediapipe/hand_landmarker.task'
 
 /* ------------------------------------------------------------------ anatomy */
 
@@ -296,6 +304,11 @@ export const diag = {
   fps: 0,
   gesture: '' as string,
   lastError: '',
+  delegate: '' as '' | 'GPU' | 'CPU',
+  /** Set when start-up fails; cleared on success. The UI shows it with a Retry button. */
+  failure: null as Failure | null,
+  /** Last time a hand was in view (performance.now ms); start time while none yet. */
+  handSeenAt: 0,
 }
 
 if (typeof window !== 'undefined') {
@@ -421,6 +434,63 @@ function fire(
   )
 }
 
+/* --------------------------------------------------------------- dwell click */
+
+/** Dwell-click settings (default on, 3 s total), persisted in localStorage. */
+export const dwellSettings: DwellSettings = loadDwellSettings(
+  typeof localStorage === 'undefined' ? null : localStorage,
+)
+export function setDwellSettings(next: Partial<DwellSettings>): void {
+  if (typeof next.enabled === 'boolean') dwellSettings.enabled = next.enabled
+  if (next.ms !== undefined) dwellSettings.ms = clampDwellMs(next.ms)
+  saveDwellSettings(typeof localStorage === 'undefined' ? null : localStorage, dwellSettings)
+}
+
+/** Per-hand dwell timers, and what the pointer ring should show (read by Pointer.tsx). */
+const dwells = new Map<number, DwellState<Element>>()
+export const dwellView = new Map<number, number>()
+
+/**
+ * Hover a control with the pointing finger and it clicks, with the same events a pinch
+ * press sends. Runs only inside the tracking loop, so it exists only while the user has
+ * turned the camera on. All timing and hit-testing is in dwell.ts.
+ */
+function dwellFrame(h: Hand, over: Element | null) {
+  const typing = isTypingIn(document.activeElement as Element | null)
+  const target = dwellTarget(over)
+  const guard = guardOf(target)
+  const r = stepDwell(
+    dwells.get(h.id) ?? newDwell<Element>(),
+    {
+      enabled: dwellSettings.enabled && !document.hidden,
+      dwellMs: dwellSettings.ms,
+      handPresent: true,
+      gesture: h.gesture,
+      x: h.x,
+      y: h.y,
+      target,
+      typing,
+      guarded: guard.guarded,
+      guardSince: guard.since,
+    },
+    performance.now(),
+  )
+  dwells.set(h.id, r.state)
+  dwellView.set(h.id, r.fire ? 0 : r.progress)
+  if (r.fire) {
+    fire(r.fire, 'pointerdown', h, true)
+    fire(r.fire, 'pointerup', h, false)
+    r.fire.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true, composed: true, clientX: h.x, clientY: h.y }),
+    )
+  }
+}
+
+function dwellDrop(id: number) {
+  dwells.delete(id)
+  dwellView.delete(id)
+}
+
 function emit(h: Hand) {
   let p = presses.get(h.id)
   if (!p) {
@@ -473,6 +543,7 @@ function emit(h: Hand) {
   }
 
   p.wasPinched = h.pinched
+  dwellFrame(h, over)
 }
 
 /** Let go of anything still held. A press that outlives its hand leaves
@@ -564,39 +635,73 @@ function classify(
 
 /* -------------------------------------------------------------------- camera */
 
+async function headOk(url: string): Promise<boolean> {
+  try {
+    const r = await fetch(url, { method: 'HEAD', cache: 'no-store' })
+    // A dev server may answer a missing file with index.html; that is not a model.
+    return r.ok && !(r.headers.get('content-type') ?? '').includes('text/html')
+  } catch {
+    return false
+  }
+}
+
+/** Checks everything start-up needs, before the camera is touched. Null means go. */
+export async function preflight(): Promise<Failure | null> {
+  const early = preflightFailure({
+    secure: window.isSecureContext,
+    hostname: location.hostname,
+    hasMediaDevices: !!navigator.mediaDevices?.getUserMedia,
+    wasmOk: true,
+    modelOk: true,
+  })
+  if (early) return early
+  const wasmOk = await headOk(`${WASM_BASE}/vision_wasm_internal.wasm`)
+  const modelOk = (await headOk(MODEL_LOCAL)) || (await headOk(MODEL_URL).catch(() => false))
+  return preflightFailure({ secure: true, hostname: '', hasMediaDevices: true, wasmOk, modelOk })
+}
+
+async function build(model: string, delegate: 'GPU' | 'CPU') {
+  const vision = await FilesetResolver.forVisionTasks(WASM_BASE)
+  return HandLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: model, delegate },
+    runningMode: 'VIDEO',
+    numHands: 2,
+    minHandDetectionConfidence: 0.5,
+    minHandPresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  })
+}
+
 async function ensureModel() {
   if (landmarker) return landmarker
   diag.loading = true
   try {
-    const vision = await FilesetResolver.forVisionTasks(WASM_BASE)
-    landmarker = await HandLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
-      runningMode: 'VIDEO',
-      numHands: 2,
-      minHandDetectionConfidence: 0.5,
-      minHandPresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    })
-    diag.ready = true
-    return landmarker
-  } catch (err) {
+    // Local copy first, remote as the fallback; GPU first, CPU as the fallback.
     // A machine with no working GPU delegate should still get hands rather than
     // an error — the CPU path is slower but perfectly usable at this frame size.
-    diag.lastError = `GPU delegate failed (${(err as Error)?.message ?? err}); retrying on CPU`
-    const vision = await FilesetResolver.forVisionTasks(WASM_BASE)
-    landmarker = await HandLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' },
-      runningMode: 'VIDEO',
-      numHands: 2,
-    })
-    diag.ready = true
-    return landmarker
+    let last: unknown = null
+    for (const model of [MODEL_LOCAL, MODEL_URL]) {
+      for (const delegate of ['GPU', 'CPU'] as const) {
+        try {
+          landmarker = await build(model, delegate)
+          diag.ready = true
+          diag.delegate = delegate
+          if (delegate === 'CPU') diag.lastError = 'GPU delegate unavailable; running on CPU (slower).'
+          return landmarker
+        } catch (err) {
+          last = err
+          diag.lastError = `${delegate} load of ${model} failed: ${(err as Error)?.message ?? err}`
+        }
+      }
+    }
+    throw new Error(`hand model could not be loaded (${(last as Error)?.message ?? last})`)
   } finally {
     diag.loading = false
   }
 }
 
 function dropHand(i: number) {
+  dwellDrop(i)
   const at = hands.findIndex((h) => h.id === i)
   if (at === -1) return
   releasePress(i, hands[at])
@@ -632,7 +737,8 @@ function loop(mine: number) {
   try {
     result = landmarker.detectForVideo(video, stamp)
   } catch (err) {
-    diag.lastError = String((err as Error)?.message ?? err)
+    // Shown in the status panel rather than swallowed; one bad frame is not fatal.
+    diag.lastError = `detect failed: ${(err as Error)?.message ?? err}`
     result = null
   }
 
@@ -641,6 +747,7 @@ function loop(mine: number) {
   const found = result?.landmarks ?? []
   const labels = result?.handedness ?? []
   diag.count = found.length
+  if (found.length > 0 || !diag.handSeenAt) diag.handSeenAt = now
   const at = now / 1000
 
   const seen = new Set<number>()
@@ -831,7 +938,14 @@ export async function enableHands(): Promise<void> {
   if (running) return
   patchPointerCapture()
   const mine = ++generation
+  diag.failure = null
   try {
+    const bad = await preflight()
+    if (bad) {
+      diag.failure = bad
+      diag.lastError = bad.message
+      throw Object.assign(new Error(bad.message), { name: 'PreflightError' })
+    }
     /**
      * One shared camera, refcounted — see camera.ts.
      *
@@ -845,12 +959,15 @@ export async function enableHands(): Promise<void> {
 
     running = true
     diag.enabled = true
+    diag.handSeenAt = performance.now()
     fpsAt = performance.now()
     schedule(mine)
   } catch (err) {
-    diag.lastError = String((err as Error)?.message ?? err)
+    diag.failure ??= describeCameraError(err)
+    diag.lastError = diag.failure.message
     disableHands()
-    throw err
+    // The caller shows err.message, so it carries the guidance.
+    throw Object.assign(new Error(diag.failure.message), { name: (err as Error)?.name })
   }
 }
 
@@ -859,6 +976,7 @@ export function disableHands(): void {
   running = false
   generation++
   diag.enabled = false
+  diag.handSeenAt = 0
   diag.count = 0
   diag.fps = 0
   diag.gesture = ''
@@ -871,6 +989,8 @@ export function disableHands(): void {
   trails.clear()
   pinchSince.clear()
   poseChangedAt.clear()
+  dwells.clear()
+  dwellView.clear()
   // Give the hold back rather than tearing the stream down: the camera blade
   // may still be showing it, and stopping the tracks would blank it.
   if (video) {

@@ -88,6 +88,19 @@ assert "careful, it changes my safety files: guardrails.py" in spoken and "CONCE
 (ws / "updates" / "FAIL").write_text("x")       # the copy's tests now fail
 before = sh("git", "rev-parse", "HEAD", cwd=live)
 expect_error(u.apply, "loosen", contains="tests failed")
+# Through the tool, apply runs in a thread, and the screen can only be drawn on from the event loop
+# (the hub's does): the failures are shown, and the refusal says why, not "no running event loop".
+class LoopScreen:
+    def __init__(self): self.shown = []
+    def say(self, t): pass
+    def show(self, title, text):
+        asyncio.get_running_loop()
+        self.shown.append(title)
+import guardrails
+guardrails._io = screen = LoopScreen()
+reply = asyncio.run(u._run(u.apply, "loosen"))
+assert reply.get("is_error") and "tests failed" in reply["content"][0]["text"], reply
+assert screen.shown == ["tests failed for loosen"]
 assert sh("git", "rev-parse", "HEAD", cwd=live) == before and not u.ROLLBACK_FILE.exists()
 (ws / "updates" / "FAIL").unlink()
 assert "Discarded" in u.discard("loosen") and not (ws / "updates" / "loosen").exists()

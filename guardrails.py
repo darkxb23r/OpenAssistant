@@ -127,6 +127,57 @@ BROWSER_AUTO = [
 # Never offered: it runs code in the server's Node process, on this PC and outside the browser,
 # so it isn't a browser action.
 BROWSER_NEVER = ["mcp__browser__browser_run_code_unsafe"]
+# Frigate NVR: read-only tools only (exact names; get_config_raw can hold secrets). Any other
+# mcp__frigate__ tool is denied in decide(), trust mode included.
+FRIGATE_AUTO = [
+    "explore_events",
+    "get_active_profile",
+    "get_audio_labels",
+    "get_camera_label_best",
+    "get_config",
+    "get_config_schema",
+    "get_event",
+    "get_event_clean_snapshot",
+    "get_event_preview_gif",
+    "get_event_snapshot",
+    "get_event_summary",
+    "get_event_thumbnail",
+    "get_events",
+    "get_events_by_ids",
+    "get_export",
+    "get_export_case",
+    "get_export_cases",
+    "get_exports",
+    "get_faces",
+    "get_labels",
+    "get_latest_frame",
+    "get_logs",
+    "get_motion_activity",
+    "get_plus_models",
+    "get_profiles",
+    "get_ptz_info",
+    "get_recognized_license_plates",
+    "get_recording_days",
+    "get_recording_snapshot",
+    "get_recording_storage",
+    "get_recording_summary",
+    "get_recordings",
+    "get_recordings_unavailable",
+    "get_review",
+    "get_review_by_event",
+    "get_review_by_id",
+    "get_review_summary",
+    "get_reviews_by_ids",
+    "get_stats",
+    "get_stats_history",
+    "get_sub_labels",
+    "get_timeline",
+    "get_timeline_hourly",
+    "get_triggers_status",
+    "get_version",
+    "get_vlm_monitor",
+    "search_events",
+]
 CALENDAR_AUTO = [
     "get_next_event", "get_todays_schedule", "get_events_in_range", "search_events",
     "check_availability", "list_invitations", "list_calendars", "list_addressbooks",
@@ -205,6 +256,7 @@ AUTO_APPROVED = [
     "mcp__updates__restart_yourself",  # a restart carries everything on (the supervisor starts it again)
     *(f"mcp__mail__{name}" for name in MAIL_AUTO),
     *(f"mcp__calendar__{name}" for name in CALENDAR_AUTO),
+    *(f"mcp__frigate__{name}" for name in FRIGATE_AUTO),
     *(f"mcp__browser__{name}" for name in BROWSER_AUTO),
 ]
 
@@ -1260,6 +1312,8 @@ async def decide(tool_name, tool_input, context):
     standing order); trusted folders count as free zone wherever the free zone does.
     """
     refresh_rules()
+    if tool_name.startswith("mcp__frigate__") and tool_name[14:] not in FRIGATE_AUTO:
+        return PermissionResultDeny(message="Frigate is read-only for Jarvis.")
     if tool_name == "Monitor" and tool_input.get("command"):
         # Monitor runs its command in the same shell as Bash, so the same rules decide it.
         tool_name = "Bash"

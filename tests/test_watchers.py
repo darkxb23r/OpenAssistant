@@ -110,7 +110,7 @@ for extra, why in [
     ("", "needs paths to look at, or a check"),
     ('paths = ["backups"]\n', "isn't a full path"),
     ('paths = ["~/backups"]\n', "isn't a full path"),
-    ('paths = ["/home/u/.ssh"]\n', "isn't a full path"),
+    (f'paths = [{json.dumps(str(home / ".ssh"))}]\n', "isn't a full path"),   # the user's own .ssh: secret
     ('paths = ["/mnt/$(reboot)"]\n', "isn't a full path"),
     ('paths = ["/mnt/b\\"; reboot; \\""]\n', "isn't a full path"),
     ('paths = "/mnt/backups"\n', "paths must be a list"),

@@ -83,6 +83,10 @@ class FakeClaude:
 
 
 j.ClaudeSDKClient = FakeClaude
+work_now: list[str] = []
+j.current_work = lambda: list(work_now)   # what's running, for the page's task list
+import web
+web.WORK_EVERY_S = 0.05
 j.detect_caveman = lambda *a, **k: False
 sys.argv = ["jarvis.py", "--core", "--new"]
 
@@ -136,6 +140,11 @@ async def main():
         await asyncio.sleep(0.1)
         assert j._io.idle.is_set()
         # Commentary between tool calls isn't said; the result after the last tool is, in full.
+        # The task list: sent to the page when something starts, and again (empty) when it's over.
+        work_now[:] = ["tidy-up", "home battery options"]
+        assert json.loads(await frame()) == {"type": "tasks", "items": ["tidy-up", "home battery options"]}
+        work_now.clear()
+        assert json.loads(await frame()) == {"type": "tasks", "items": []}
         await claude.inject_work()
         assert json.loads(await frame()) == {"type": "say", "text": "It works."}
         assert json.loads(await frame()) == {"type": "say", "text": "One listing so far."}

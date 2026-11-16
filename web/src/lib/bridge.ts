@@ -23,6 +23,8 @@ export type AskHandlers = {
  *  bridge build should be ignored, not crash the turn. */
 type Frame = {
   type?: string
+  /** The `tasks` frame: what he's working on, by name. */
+  items?: unknown[]
   delta?: string
   name?: string
   text?: string
@@ -61,6 +63,12 @@ export const bridgeServers = () => servers
 let onServers: ((s: string[]) => void) | null = null
 export function watchServers(fn: (s: string[]) => void) {
   onServers = fn
+}
+
+/** What he's working on (tasks and research, by name), sent whenever it changes. */
+let onTasks: ((t: string[]) => void) | null = null
+export function watchTasks(fn: (t: string[]) => void) {
+  onTasks = fn
 }
 
 /** Panels arrive out of band — they're pushed while a turn is in flight,
@@ -405,7 +413,10 @@ function dispatch(ws: WebSocket, welcomed: () => void) {
         .map((s) => (typeof s === 'string' ? s : (s.name ?? '')))
         .filter(Boolean)
       onServers?.(servers)
+      onTasks?.([])   // a fresh connection: the core sends its list next, if anything is running
       firstReady.resolve()
+    } else if (msg.type === 'tasks') {
+      onTasks?.((Array.isArray(msg.items) ? msg.items : []).filter((t: unknown) => typeof t === 'string'))
     } else if (msg.type === 'settings' || msg.type === 'settings_saved') {
       onSettings?.(msg as SettingsReply)
     } else if (msg.type === 'ticket') {

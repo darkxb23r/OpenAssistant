@@ -50,7 +50,8 @@ The protocol is the one web/src/lib/bridge.ts speaks, after the hello and welcom
                      {"type": "ticket", "media_ticket"?} (the answer to a ticket frame; none in
                      open mode or without a device),
                      {"type": "settings", "fields" | "error"}, {"type": "settings_saved", "saved" | "errors"},
-                     {"type": "browser_control", "on": false} (control refused or taken away).
+                     {"type": "browser_control", "on": false} (control refused or taken away),
+                     {"type": "tasks", "items"} (what's on the go by name: tasks and research).
 """
 import asyncio
 import contextlib
@@ -90,6 +91,7 @@ from speech import Speech
 
 log = logging.getLogger("jarvis.web")
 
+WORK_EVERY_S = 3   # how often the task list is checked for changes
 HOST = "127.0.0.1"   # never another interface: the socket can drive Jarvis
 PORT = int(os.environ.get("JARVIS_WEB_PORT") or 8790)   # 8787 is the Caveman proxy's
 DIST = Path(__file__).resolve().parent / "web" / "dist"  # `npm run build` in web/
@@ -265,6 +267,8 @@ class WebServer:
     def __init__(self, hub, servers: list[str], port: int = PORT, speech: Speech | None = None,
                  required: bool = True, devices: Devices | None = None):
         self.hub, self.servers, self.port = hub, servers, port
+        self.work = lambda: []   # what's running (jarvis.current_work), for the page's task list
+        self._work_seen: list[str] = []
         self.speech = speech or Speech(enabled=False)
         self.devices = devices or Devices()   # paired devices; none paired = open mode
         self.required = required      # a busy port stops Jarvis; else it carries on without the interface
@@ -307,6 +311,7 @@ class WebServer:
                                                    lifespan="off"))
         asyncio.create_task(self._server.serve())
         self._cameras = asyncio.create_task(live_sources.keep_fresh())
+        self._work_watch = asyncio.create_task(self._watch_work())
         for _ in range(100):
             if self._server.started:
                 break
@@ -339,7 +344,26 @@ class WebServer:
             self._server.should_exit = True
         if self._cameras:
             self._cameras.cancel()
+        if getattr(self, "_work_watch", None):
+            self._work_watch.cancel()
         self.running = False
+
+    async def _watch_work(self) -> None:
+        """The left rail's task list: sent to every page whenever it changes ({"type": "tasks", "items"}:
+        names only), and to each page as it connects."""
+        while True:
+            try:
+                items = list(self.work())
+            except Exception:
+                log.exception("couldn't list the current tasks")
+                items = self._work_seen
+            if items != self._work_seen:
+                self._work_seen = items
+                for client in list(self.clients):
+                    if client.display:
+                        with contextlib.suppress(Exception):
+                            await client.write({"type": "tasks", "items": items})
+            await asyncio.sleep(WORK_EVERY_S)
 
     def send(self, frame: dict) -> bool:
         """Draw on the screen in use (the interface tools use this). False if none is connected."""
@@ -621,6 +645,8 @@ class WebServer:
         self.hub.register(client)
         log.info("%s connected (%d open)", client.kind, len(self.clients))
         await client.write({"type": "ready", "servers": self.servers})
+        if self._work_seen:   # the page starts each connection with none (bridge.ts, on ready)
+            await client.write({"type": "tasks", "items": self._work_seen})
         if client.display:   # what the screen was showing, so this one carries on from there
             for frame in self.hub.scene.frames():
                 await client.write(frame)

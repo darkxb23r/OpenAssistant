@@ -73,8 +73,10 @@ async def main():
     task = t.load("tidy-up")
     assert all(s.mark == "x" for s in task.steps) and task.steps[0].note == "listed"
     assert any("not accepted: no listing shown" in line for line in task.log)          # retried after the check
-    assert said[-1] == "The tidy-up task is finished. Folder is tidy."
-    assert t.events[-1] == said[-1]          # the conversation hears about it too (jarvis.py drains this)
+    assert said[-1] == "The tidy-up task is done. Shall I go over it?"      # a notice, and an offer
+    # The conversation hears what it was and how to recap it, when the user is ready (jarvis.py drains this).
+    assert "Folder is tidy." in t.events[-1] and "task_status for tidy-up" in t.events[-1]
+    assert "only when they say they're ready" in t.events[-1]
     assert ASKED == ["yes"] and g._io.q == "run a command: x, for the tidy-up task"   # questions name the task
     assert "already done" in await tool(t.start_task_tool, name="tidy-up")
 

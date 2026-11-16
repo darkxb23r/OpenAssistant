@@ -24,6 +24,7 @@ import {
   warm,
   interrupt,
   watchServers,
+  watchTasks,
   watchPanels,
   watchBlades,
   watchBladeClose,
@@ -479,6 +480,7 @@ export default function App() {
     s.setPhase('boot')
 
     watchServers((servers) => store.getState().setConnected(servers))
+    watchTasks((tasks) => store.getState().setTasks(tasks))
     watchPanels((panel) => store.getState().pushPanel(panel))
     watchBlades((blade) => store.getState().pushBlade(blade))
     watchBladeClose((id) => store.getState().closeBlade(id))

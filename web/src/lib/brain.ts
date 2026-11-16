@@ -27,6 +27,11 @@ export function watchServers(fn: (servers: string[]) => void): void {
   bridge.watchServers(fn)
 }
 
+/** What he's working on (tasks and research, by name), whenever it changes. */
+export function watchTasks(fn: (tasks: string[]) => void): void {
+  bridge.watchTasks(fn)
+}
+
 /** HUD panels are pushed mid-turn by the `display` tool, not returned by ask(). */
 export function watchPanels(fn: (panel: Panel) => void): void {
   bridge.watchPanels(fn)

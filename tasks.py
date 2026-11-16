@@ -54,9 +54,16 @@ say = print
 events: list[str] = []
 
 
-def announce(text: str) -> None:
-    events.append(text)
+def announce(text: str, context: str | None = None) -> None:
+    """Tell the user (text), and the conversation at the user's next line (context, or the same)."""
+    events.append(context or text)
     say(text)
+
+
+# Finished work is a short notice with an offer; the recap waits until the user wants it.
+RECAP = ("You told the user it's done and offered a recap. Recap only when they say they're ready "
+         "(\"go ahead\", \"what did you find?\"), from {source}: the outcome first, in a few spoken "
+         "sentences, then offer the details. If they move on to something else, leave it for later.")
 
 
 # --- the task file ---------------------------------------------------------------------------------
@@ -294,7 +301,9 @@ async def _run(name: str) -> None:
                 task.save()
                 log.info("[%s] done", name)
                 guardrails.drop_grants(name)
-                announce(f"The {name} task is finished. {task.done_when}")
+                announce(f"The {name} task is done. Shall I go over it?",
+                         f"The {name} task finished ({task.done_when}). "
+                         + RECAP.format(source=f"task_status for {name} (its steps and what each did)"))
                 return
             if step.mark == "?":   # still waiting on the user
                 task.status = "waiting"

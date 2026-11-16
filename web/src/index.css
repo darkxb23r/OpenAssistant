@@ -162,6 +162,13 @@ body::after {
   opacity: 0.82;
 }
 .rail-item.dim { opacity: 0.3; }
+.rail-title.rail-gap { margin-top: 14px; }
+.rail-task {
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .rail-item.mono { font-family: 'JetBrains Mono', monospace; letter-spacing: 0.1em; }
 
 .tick {
@@ -275,7 +282,18 @@ body::after {
   gap: 12px;
   text-transform: none;
   letter-spacing: 0.01em;
+  /* Scrollable: the whole conversation the page keeps, the oldest fading out at the top. The HUD
+     ignores the pointer; the log takes it, so the wheel and a drag on a touch screen scroll it. */
+  max-height: 34vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  padding-right: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--accent) 40%, transparent) transparent;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 36px);
 }
+.log-line { flex-shrink: 0; }
 
 .log-line {
   display: flex;
@@ -2107,6 +2125,25 @@ kbd {
   align-items: center;
   gap: 8px;
   margin-top: 16px;
+  /* Always on screen, however far down the panel is scrolled: SAVE and RESTART stay in reach. */
+  position: sticky;
+  bottom: 0;
+  padding: 10px 0 18px;
+  background: color-mix(in srgb, var(--accent) 5%, rgba(2, 10, 12, 0.97));
+}
+.settings-choices {
+  display: flex;
+  gap: 6px;
+}
+.settings-choice {
+  min-width: 84px;
+  min-height: 34px;   /* big enough to hold a fingertip on */
+  opacity: 0.55;
+}
+.settings-choice.on {
+  opacity: 1;
+  border-color: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 .settings-foot .settings-note {
   flex: 1;

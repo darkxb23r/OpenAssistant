@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { DEFAULT_IDENTITY, type Identity } from './lib/identity'
+import { DEFAULT_IDENTITY, type Identity } from './lib/identity.ts'
 
 export type Phase =
   | 'offline'   // waiting for the click that unlocks audio
@@ -236,6 +236,8 @@ type State = {
   /** Whether he is speaking aloud right now (tts.audible()). */
   audible: boolean
   connected: string[]
+  /** What he's working on, by name: tasks and research (the core's `tasks` frame). */
+  tasks: string[]
   /** Name of the speech-synthesis voice in use, shown in the HUD. */
   voice: string
   /** Whether the camera is on and hands are being tracked. Store-backed rather
@@ -280,6 +282,7 @@ type State = {
   setSettingsOpen: (open: boolean) => void
   setAudible: (on: boolean) => void
   setConnected: (c: string[]) => void
+  setTasks: (t: string[]) => void
   pushTurn: (t: Turn) => void
   appendToLastTurn: (text: string) => void
 
@@ -308,6 +311,7 @@ export const useStore = create<State>((set) => ({
   settingsOpen: false,
   audible: false,
   connected: [],
+  tasks: [],
   voice: '',
   gestures: false,
   looking: null,
@@ -387,6 +391,7 @@ export const useStore = create<State>((set) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setAudible: (audible) => set({ audible }),
   setConnected: (connected) => set({ connected }),
+  setTasks: (tasks) => set({ tasks }),
   pushTurn: (turn) => set((s) => ({ turns: [...s.turns.slice(-40), turn] })),
   appendToLastTurn: (text) =>
     set((s) => {
@@ -497,7 +502,7 @@ export function accentFor(phase: Phase, ui: UiState): string {
 //   __jarvis.addOrbit({ id: 'moon', src: '/vite.svg', radius: 0.6, speed: 8,
 //                       size: 90, tilt: 25, opacity: 1, phase: 0 })
 //   __jarvis.fireEffect('glitch'); __jarvis.resetUi()
-if (import.meta.env.DEV) {
+if (import.meta.env?.DEV) {   // ?.: under Node (the tests) there's no import.meta.env
   // Not `useStore.getState()` directly: zustand replaces the state object on
   // every set, so a captured snapshot's *actions* keep working while every
   // data field reads forever as it was at module load. `__jarvis.phase` said

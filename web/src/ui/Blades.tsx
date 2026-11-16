@@ -645,8 +645,9 @@ function Card({
    * Reads a distance from hands.ts and decides here that it means scrolling —
    * the tracker publishes the pose, not the consequence.
    */
+  const settingsOpen = useStore((s) => s.settingsOpen)
   useEffect(() => {
-    if (!focused) return
+    if (!focused || settingsOpen) return   // the Settings panel, over everything, takes the scroll then
     let raf = 0
     let last: number | null = null
     const tick = () => {
@@ -667,7 +668,7 @@ function Card({
     }
     tick()
     return () => cancelAnimationFrame(raf)
-  }, [focused])
+  }, [focused, settingsOpen])
 
   /**
    * Frame the blade with both hands to resize it.

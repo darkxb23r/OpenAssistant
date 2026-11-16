@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   requestSettings,
   restartCore,
@@ -7,6 +7,23 @@ import {
   type SettingField,
 } from '../lib/bridge'
 import { MEANING_MAX } from '../lib/identity'
+import { peaceScroll } from '../lib/hands'
+
+/**
+ * Settings with a few fixed values are a row of buttons, not a drop-down: a hand can dwell on a
+ * button, never on a <select>. Everything here but typing works by dwell (or a pinch): the
+ * choices, CLEAR / KEEP, SAVE, RESTART (pressed twice) and CLOSE; two fingers up scrolls.
+ */
+const CHOICES: Record<string, [string, string][]> = {
+  JARVIS_CODEX: [['0', 'OFF'], ['1', 'ON']],
+  MODEL_PROVIDER: [['claude', 'CLAUDE'], ['ollama', 'OLLAMA']],
+}
+const CHOICE_NOW: Record<string, (v: string) => string> = {
+  JARVIS_CODEX: (v) => (['1', 'true', 'yes', 'on'].includes(v.toLowerCase()) ? '1' : '0'),
+  MODEL_PROVIDER: (v) => (v.toLowerCase() === 'ollama' ? 'ollama' : 'claude'),
+}
+/** How long RESTART waits for its second press. */
+const CONFIRM_MS = 6000
 
 /**
  * Settings: ~/.jarvis/secrets.env, edited here (settings.py on the core).
@@ -22,6 +39,33 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [note, setNote] = useState('')
   const [saved, setSaved] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const backdrop = useRef<HTMLDivElement>(null)
+
+  // RESTART asks for a second press, in the panel (a browser confirm() can't be dwelt on).
+  useEffect(() => {
+    if (!confirming) return
+    const t = setTimeout(() => setConfirming(false), CONFIRM_MS)
+    return () => clearTimeout(t)
+  }, [confirming])
+
+  // Two fingers up, moved up or down, scrolls the panel (as it does a blade).
+  useEffect(() => {
+    let raf = 0
+    let last: number | null = null
+    const tick = () => {
+      raf = requestAnimationFrame(tick)
+      const travelled = peaceScroll()
+      if (travelled === null) {
+        last = null
+        return
+      }
+      if (last !== null) backdrop.current?.scrollBy(0, (last - travelled) * 2.4)
+      last = travelled
+    }
+    tick()
+    return () => cancelAnimationFrame(raf)
+  }, [])
 
   useEffect(() => {
     watchSettings((reply) => {
@@ -64,7 +108,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const pending = Object.keys(changes()).length
 
   return (
-    <div className="settings-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div ref={backdrop} className="settings-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form
         className="settings"
         role="dialog"
@@ -109,15 +153,24 @@ export function Settings({ onClose }: { onClose: () => void }) {
                       {f.environment ? ' · set in the environment, which wins' : ''}
                     </span>
                   </label>
-                  {f.key === 'JARVIS_CODEX' ? (
-                    <select
-                      id={id}
-                      value={draft[f.key] ?? (['1', 'true', 'yes', 'on'].includes((f.value ?? '').toLowerCase()) ? '1' : '0')}
-                      onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
-                    >
-                      <option value="0">Off</option>
-                      <option value="1">On</option>
-                    </select>
+                  {CHOICES[f.key] ? (
+                    <div id={id} className="settings-choices" role="radiogroup" aria-label={f.label}>
+                      {CHOICES[f.key].map(([value, label]) => {
+                        const on = (draft[f.key] ?? CHOICE_NOW[f.key](f.value ?? '')) === value
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            role="radio"
+                            aria-checked={on}
+                            className={`settings-choice${on ? ' on' : ''}`}
+                            onClick={() => setDraft({ ...draft, [f.key]: value })}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
                   ) : f.key === 'JARVIS_NAME_MEANING' ? (
                     <textarea
                       id={id}
@@ -175,13 +228,17 @@ export function Settings({ onClose }: { onClose: () => void }) {
               type="button"
               className={saved ? 'settings-restart-due' : undefined}
               title={saved ? 'Saved settings apply after a restart' : 'Restart Jarvis'}
-              onClick={() =>
-                window.confirm('Restart Jarvis now? Anything he is doing in the background stops.') &&
-                restartCore() &&
-                setNote('Restarting Jarvis…')
-              }
+              onClick={() => {
+                if (!confirming) {
+                  setConfirming(true)
+                  setNote('Press again to restart. Anything he is doing in the background stops.')
+                } else {
+                  setConfirming(false)
+                  setNote(restartCore() ? 'Restarting Jarvis…' : 'Not connected to Jarvis.')
+                }
+              }}
             >
-              RESTART JARVIS
+              {confirming ? 'CONFIRM RESTART' : 'RESTART JARVIS'}
             </button>
             <button type="submit" disabled={!pending}>
               SAVE{pending ? ` (${pending})` : ''}

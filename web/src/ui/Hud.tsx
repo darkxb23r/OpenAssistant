@@ -153,6 +153,16 @@ export function Hud() {
   const turns = useStore((s) => s.turns)
   const activeTool = useStore((s) => s.activeTool)
   const connected = useStore((s) => s.connected)
+  const tasks = useStore((s) => s.tasks)
+  // The conversation log scrolls. It keeps to the newest line while you're at the bottom, and stays
+  // put while you've scrolled up to read.
+  const logRef = useRef<HTMLDivElement>(null)
+  const atBottom = useRef(true)
+  const newest = turns.length ? turns[turns.length - 1] : null
+  useEffect(() => {
+    const el = logRef.current
+    if (el && atBottom.current) el.scrollTop = el.scrollHeight
+  }, [turns.length, newest?.text])
   const error = useStore((s) => s.error)
   const level = useStore((s) => s.level)
   const voice = useStore((s) => s.voice)
@@ -238,6 +248,14 @@ export function Hud() {
             <span className="tick" />
             Web
           </div>
+          <div className="rail-title rail-gap">TASKS</div>
+          {tasks.length === 0 && <div className="rail-item dim">none</div>}
+          {tasks.map((t) => (
+            <div key={t} className="rail-item rail-task" title={t}>
+              <span className="tick" />
+              {t}
+            </div>
+          ))}
         </aside>
       )}
 
@@ -276,11 +294,18 @@ export function Hud() {
         )}
       </AnimatePresence>
 
-      {/* Conversation log — last few turns, fading upward */}
+      {/* Conversation log: everything kept, scrollable, fading upward */}
       {ui.chrome.transcript && (
-        <div className="log">
+        <div
+          className="log"
+          ref={logRef}
+          onScroll={(e) => {
+            const el = e.currentTarget
+            atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+          }}
+        >
           <AnimatePresence initial={false}>
-            {turns.slice(-4).map((t) => (
+            {turns.map((t) => (
               <motion.div
                 key={t.id}
                 className={`log-line log-${t.role}`}

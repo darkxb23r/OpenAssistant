@@ -192,7 +192,11 @@ def _people(value) -> str:
 # Tools that send something to other people or destroy something. Each call asks the user with
 # this summary; neither "always" nor trust mode skips them. (Contact edits and alarms aren't
 # here: they go through the normal question, where "always" works.)
+START_RESEARCH = "mcp__research__start_research"
 CONFIRM_TOOLS = {
+    # Only with logged_in_sites (decide() lets the public-web kind through): browsing as the user.
+    START_RESEARCH: lambda a: f"research {a.get('topic', 'that')} using the sites you're logged into in my "
+                              "browser, reading only",
     "mcp__mail__send_message": lambda a: f"send an email to {_people(a.get('to'))}"
     + (f", subject {a['subject']}" if a.get("subject") else "")
     + (", with attachments" if a.get("attachments") else ""),
@@ -243,6 +247,8 @@ AUTO_APPROVED = [
     "mcp__phone__scheduled_calls",
     # Long tasks: planning, starting, checking on them. Their workers still ask before risky actions.
     "mcp__tasks__create_task",
+    "mcp__research__research_status",
+    "mcp__research__stop_research",
     "mcp__tasks__task_status",
     "mcp__tasks__answer_task",
     "mcp__tasks__pause_task",
@@ -1314,6 +1320,8 @@ async def decide(tool_name, tool_input, context):
     refresh_rules()
     if tool_name.startswith("mcp__frigate__") and tool_name[14:] not in FRIGATE_AUTO:
         return PermissionResultDeny(message="Frigate is read-only for Jarvis.")
+    if tool_name == START_RESEARCH and not tool_input.get("logged_in_sites"):
+        return PermissionResultAllow()   # the public web, searched and read: nothing to ask about
     if tool_name == "Monitor" and tool_input.get("command"):
         # Monitor runs its command in the same shell as Bash, so the same rules decide it.
         tool_name = "Bash"

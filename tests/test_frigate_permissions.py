@@ -53,7 +53,7 @@ assert mcp_launch.configured("frigate") is False
 sys.argv = ["mcp_launch.py", "frigate"]
 assert mcp_launch.main() == 1
 mcp_launch.SERVERS["frigate"]["requires"] = real
-assert mcp_launch.SERVERS["frigate"]["cwd"] == "/tmp"
+assert mcp_launch.SERVERS["frigate"]["cwd"] == tempfile.gettempdir()   # /tmp on Linux, %TEMP% on Windows
 if Path(real).exists():
     assert "frigate" in j.MCP_SERVERS
 print("ALL OK")
